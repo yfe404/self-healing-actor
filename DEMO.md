@@ -6,7 +6,7 @@ Nobody has clicked through this runbook in a browser yet. Its Console steps were
 
 ## The video
 
-A narrated 5.5 minute video of the whole demo, recorded from a real run, is at [video/self-healing-actor-demo.mp4](video/self-healing-actor-demo.mp4). The [recorder source](video/record.ts) now uses revised narration and captions. The existing video keeps its earlier wording.
+A narrated 6 minute video of the whole demo, recorded from a real run, is at [video/self-healing-actor-demo.mp4](video/self-healing-actor-demo.mp4). The [recorder source](video/record.ts) produced it.
 
 To record it again, run `cd video && npx tsx record.ts`. The recorder needs `APIFY_TOKEN`, which is your Apify API token. A run takes about 7 minutes and resets the platform state afterwards.
 
@@ -30,7 +30,7 @@ The demo needs four people:
 - a skeptic, who stops the agent in the middle of its work
 - a message sender, who sends the agent a message from their own browser
 
-Nothing runs on a developer machine during the demo. Every action is an Apify Console click or a URL opened in a browser. The Apify account is `straightforward_understanding`. The earlier runbook says all IDs live in [config.ts](config.ts). That file holds account and Actor names. The fixed run, store, and build IDs also appear in this runbook, [scripts/smoke.ts](scripts/smoke.ts), and [video/record.ts](video/record.ts).
+Nothing runs on a developer machine during the demo. Every action is an Apify Console click or a URL opened in a browser. The Apify account is `straightforward_understanding`. [config.ts](config.ts) holds the account and Actor names. The fixed run, store, and build IDs appear in this runbook, [scripts/smoke.ts](scripts/smoke.ts), and [video/record.ts](video/record.ts).
 
 ## Before you start (5 minutes, once)
 
@@ -89,8 +89,6 @@ What to say:
 - The agent's first sentence comes from its own saved build notes. We did not write it into a prompt.
 - The incident enters the transcript as a platform entry, separate from user messages. The transcript is the record of everything the model sees. So the audit trail shows who said what.
 
-Cost clarification: the earlier runbook calls the page comparison "costs nothing" and "for free". The [comparison code](repair-actor/src/diff-bundle.ts) avoids a model call, but it still fetches the page and writes records while the Actor runs. Those phrases do not account for platform resource use.
-
 Fallback: if the repair run has not appeared after 60 seconds, start it by hand. Open the repair Actor, click **Start**, and use the input `{ "actorId": "ctzTh4lGVmdeKVFDl", "failedRunId": "<FAILED_RUN_ID>" }`. Replace `<FAILED_RUN_ID>` with the id of the red run. The outcome is the same.
 
 ## Step 3: stop the repair run, start it again, and it picks up where it left off (2 minutes)
@@ -98,8 +96,8 @@ Fallback: if the repair run has not appeared after 60 seconds, start it by hand.
 1. Skeptic: wait until the Live view shows the agent in the middle of its investigation. Choose a moment while a tool call is running. A tool call is one action the agent takes through one of its tools, for example `build_scraper`, which builds the fixed scraper, or `run_canary`, which starts a test run of it. Then open the repair run and click **Abort**.
 2. Presenter: open the agent memory store. Point at these records:
    - `log-000000nnn`: one record per saved step, where `nnn` is the step number. The code calls a saved step a commit.
-   - `snapshot-000000nnn`: every 25 saved steps, one combined record of all writes so far. It reduces the number of records startup reads. The earlier runbook calls this a summary. It contains the accumulated writes needed to rebuild memory.
-   - `head`: the saved-step number at the latest snapshot. The earlier runbook calls it the latest saved step. The [storage code](repair-actor/src/kvstore/apify-kv-storage.ts) updates it with each snapshot and does not trust it at startup.
+   - `snapshot-000000nnn`: every 25 saved steps, one combined record of all writes so far. It reduces the number of records startup reads. It contains the accumulated writes needed to rebuild memory.
+   - `head`: the saved-step number at the latest snapshot. The [storage code](repair-actor/src/kvstore/apify-kv-storage.ts) updates it with each snapshot and does not trust it at startup.
    - the `fixture-*` records from the build session. These build references are copies the agent saves when it builds the scraper, such as the page and a sample of the expected output. The code calls them fixtures.
    - `incident-<FAILED_RUN_ID>`, the incident written a minute ago.
 

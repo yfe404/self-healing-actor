@@ -117,8 +117,6 @@ Nobody has clicked through DEMO.md in a browser yet. The presenter should do one
 
 [video/record.ts](video/record.ts) records a live pass of Steps 1 to 5 with a headless Chromium. What you see is real: the real site, real logs from the API, and the real agent web page, typed into and clicked.
 
-The narration is synthesized speech, made from fixed text with edge-tts, a text-to-speech tool. It is placed at the recorded start time of each scene. The original decision says nothing is staged except the title, cast, and closing cards.
+The narration is synthesized speech, made from fixed text with edge-tts, a text-to-speech tool. It is placed at the recorded start time of each scene. Nothing is staged except the title, cast, and closing cards.
 
 The recorder also draws local views of the layout change, page pictures, memory store, and report. Those views use live platform data. They do not show the Console interface itself. See the [recorder's scene code](video/record.ts).
-
-The publication edit changes narration and caption text in the recorder source. The existing video keeps its recorded wording. See the [publication update](PROGRESS.md#publication-update).

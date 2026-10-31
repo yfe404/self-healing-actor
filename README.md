@@ -2,9 +2,8 @@
 
 This demo repairs an Apify scraper after the website changes its layout. A failed scraper run starts the repair Actor, which runs the AI agent. It uses a language model and tools to inspect the page, change the scraper, and test the fix. Tools are actions supplied by code. A person approves before the fix goes live. The agent saves its work in an Apify key-value store, which holds named records, so it can recover saved work after a restart. You can watch, send a message, and approve through the agent web page that the repair run serves. [Follow the demonstration](DEMO.md).
 
-[Watch the narrated demo video](video/self-healing-actor-demo.mp4): a real 5.5 minute pass shows the failure, repair, stop and restart, audience message, approval, and working scraper. [Recording history](PROGRESS.md).
+[Watch the narrated demo video](video/self-healing-actor-demo.mp4). It is a 6 minute recording of one real pass: the failure, the repair, a stop and restart, a message from the audience, the approval, and the working scraper. [How it was recorded](DECISIONS.md#d17-the-demo-video-is-a-recording-of-a-real-pass).
 
-The video keeps its recorded narration. The [recorder source](video/record.ts) now uses revised wording, as noted in the [publication update](PROGRESS.md#publication-update).
 
 ## How it works
 
@@ -43,186 +42,105 @@ The working directory also has local-only entries outside the published project 
 
 ## Run it yourself
 
-### Choose the existing deployment or local checks
-
-**The live commands target the existing demo account.** They use `straightforward_understanding`, its Actor names, and its original scraper build. Only run them if you are authorized to change that deployment. [Account settings](config.ts) and [reset implementation](scripts/smoke.ts).
-
-**An unchanged checkout is not a fresh-account installer.** Account references also appear in the [repair Actor's platform code](repair-actor/src/platform.ts) and [recorder](video/record.ts). The unattended script resets to build `x1nrd0s8qY8NVe6aK`. Recreating the demo in another account requires adapting those references and creating the agent's saved memory. The commands below do not perform that adaptation. [Reset build](scripts/smoke.ts) and [memory creation](repair-actor/scripts/build-session.ts).
+The live commands use the account `straightforward_understanding`, the Actor names in [`config.ts`](config.ts), and fixed store, run, and build IDs in [`scripts/smoke.ts`](scripts/smoke.ts), [`video/record.ts`](video/record.ts), and [`DEMO.md`](DEMO.md). Run them only if you may change that deployment. To rebuild the demo in another account, follow [Rebuild in another account](#rebuild-in-another-account).
 
 ### Prerequisites
 
-- Use Node.js, the program that runs the JavaScript tools, and npm, its package installer. The repair package requires Node `>=22.19.0`. The recorded local environment uses Node 26, and npm 12 writes its lockfile, the file listing resolved package versions. The documented npm 10 rejection concerns the platform build image. Local installation with older npm versions is not verified here. [Environment notes](NOTES-research.md), [version requirement](repair-actor/package.json), and [lockfile caveat](DECISIONS.md).
-- For live steps, obtain an `APIFY_TOKEN` authorized for the configured Actors and stores. Obtain an `OPENROUTER_API_KEY` if you configure the repair Actor or recreate its saved memory. OpenRouter is the service through which the agent accesses language models. [Credential locations](.env.example), [deployment requirements](scripts/deploy.ts), and [model decision](DECISIONS.md).
-- For a live presentation, use a browser signed in to the Apify Console and follow the [presenter's preparation](DEMO.md).
-- For uploading the repair Actor, install and authenticate the Apify command-line tool so you can run `apify push`. This is separate from running the existing deployment. [Upload decision](DECISIONS.md).
-- For recording a new video, also provide the Chromium browser at `/usr/bin/chromium`, the Python tool runner `uvx` to run the speech generator `edge-tts`, and the media tools `ffmpeg` and `ffprobe`. These are not needed for the local checks or the browser presentation. [Recorder requirements](video/record.ts).
+- Node.js 22.19 or later and npm. The repository was built with Node 26 and npm 12. The platform build image uses npm 10, which is why the [Dockerfile](repair-actor/Dockerfile) runs `npm install` instead of `npm ci`. See [D11](DECISIONS.md#d11-the-repair-actors-source-folder-is-srckvstore).
+- `APIFY_TOKEN`, a personal API token from [Apify Console](https://console.apify.com/settings/integrations). Every live command reads it from the shell.
+- `OPENROUTER_API_KEY`, a key from [OpenRouter](https://openrouter.ai/settings/keys), the service the agent uses to reach language models. Only the deployment and memory-creation commands need it.
+- The Apify CLI, installed with `npm install -g apify-cli` and signed in with `apify login`, to upload the repair Actor.
+- To record a new video: Chromium at `/usr/bin/chromium`, `uvx` from [uv](https://docs.astral.sh/uv/) to run the speech generator `edge-tts`, and `ffmpeg` with `ffprobe`.
 
-### Install and check locally
+[`.env.example`](.env.example) lists the two credentials. Export them in your shell. The scripts do not read a `.env` file.
 
-Start in the repository root. The package files define separate installations for the [root tools](package.json), [repair Actor](repair-actor/package.json), and [recorder](video/package.json). The commands use npm's `npx` launcher to run installed tools. `tsx` runs TypeScript source files, and `tsc` checks and compiles them. [Tool dependencies](package.json).
+```sh
+export APIFY_TOKEN='YOUR_APIFY_TOKEN'
+export OPENROUTER_API_KEY='YOUR_OPENROUTER_API_KEY'
+```
 
-Each installation and check below has an unrecorded duration. These steps do not start Actors or make model requests. They leave platform state unchanged. Package installation downloads software, and compilation writes local output. [Package commands](repair-actor/package.json), [compiler settings](repair-actor/tsconfig.json), and [local tests](repair-actor/test/kv-storage.test.ts).
+### Check the repository locally
 
-1. Install the root tools:
+These commands touch nothing on the platform. Together they take about two minutes on a laptop.
 
-   ```sh
-   npm ci
-   ```
-
-2. Install the repair Actor's tools:
-
-   ```sh
-   npm ci --prefix repair-actor
-   ```
-
-3. Install the recorder's tools:
+1. Install the three sets of dependencies:
 
    ```sh
-   npm ci --prefix video
+   npm ci && npm ci --prefix repair-actor && npm ci --prefix video
    ```
 
-4. Disable optional platform tests before running the local tests. `KV_CONFORMANCE_PLATFORM=1` enables tests that create and delete real stores. [Platform-test switch](repair-actor/test/kv-storage.test.ts).
-
-   ```sh
-   unset KV_CONFORMANCE_PLATFORM
-   ```
-
-5. Check the documentation. `--all` also includes new Markdown files that Git does not yet track. [Checker implementation](scripts/check-docs.mjs).
+2. Check the Markdown files for broken links and forbidden wording. The checker is [`scripts/check-docs.mjs`](scripts/check-docs.mjs).
 
    ```sh
    node scripts/check-docs.mjs
-   node scripts/check-docs.mjs --all
    ```
 
-6. Compile the repair code and its scripts, then run the local tests. TypeScript compilation checks the source types, and Vitest runs the tests. [Repair commands](repair-actor/package.json) and [script compiler settings](repair-actor/tsconfig.scripts.json).
+3. Compile the repair Actor and run its storage tests. The tests use the conformance suite that ships with Pi Durable. Setting `KV_CONFORMANCE_PLATFORM=1` adds 25 cases that create and delete real stores, so leave it unset for a local check. See [the test file](repair-actor/test/kv-storage.test.ts).
 
    ```sh
-   cd repair-actor && npx tsc -p tsconfig.json && npx tsc -p tsconfig.scripts.json && npx vitest --run
+   cd repair-actor && npx tsc -p tsconfig.json && npx tsc -p tsconfig.scripts.json && npx vitest --run && cd ..
    ```
 
-7. Check the [recorder's](video/record.ts) types without running it:
+4. Type-check the scripts and the recorder without running them:
 
    ```sh
-   cd ../video && npx tsc --noEmit --strict --module nodenext --target es2023 --moduleResolution nodenext --skipLibCheck --types node record.ts
+   npx tsc --noEmit --strict --module nodenext --target es2023 --moduleResolution nodenext --skipLibCheck --types node scripts/smoke.ts scripts/deploy.ts
+   cd video && npx tsc --noEmit --strict --module nodenext --target es2023 --moduleResolution nodenext --skipLibCheck --types node record.ts && cd ..
    ```
 
-8. Return to the root and check the [deployment](scripts/deploy.ts) and [unattended-demo](scripts/smoke.ts) scripts without running them:
+### Run the demo on the existing deployment
 
-   ```sh
-   cd .. && npx tsc --noEmit --strict --module nodenext --target es2023 --moduleResolution nodenext --skipLibCheck --types node scripts/smoke.ts scripts/deploy.ts
-   ```
+Each pass starts real runs. Measured on this account, one repair run costs between 0.02 and 0.04 USD of Apify usage, and a scraper run or build costs under 0.001 USD. A full pass therefore costs under 0.10 USD on Apify, plus the OpenRouter model calls, which this project did not measure per pass.
 
-### Set credentials for live commands
-
-The scripts read environment variables from the shell. Copying `.env.example` to `.env` does not load them. Use the exports below instead. Replace `YOUR_APIFY_TOKEN` and `YOUR_OPENROUTER_API_KEY` with your credentials from the locations in [`.env.example`](.env.example). [Environment reads](scripts/deploy.ts).
-
-1. Export your Apify token:
-
-   ```sh
-   export APIFY_TOKEN='YOUR_APIFY_TOKEN'
-   ```
-
-2. If you will configure the repair Actor or create memory, export your OpenRouter key:
-
-   ```sh
-   export OPENROUTER_API_KEY='YOUR_OPENROUTER_API_KEY'
-   ```
-
-These exports only set local shell values. They have no platform or model cost and leave platform state unchanged. Their duration is unrecorded. They do not configure the deployed Actor. The `repair-env` command below sets its model key as a secret. [Secret configuration](scripts/deploy.ts).
-
-### Run the existing demo
-
-**These commands change live state and use platform resources.** A full pass also makes model requests. Dollar costs are not recorded in the published runbook or work log. Treat each cost as unknown. The report records Apify compute units, its resource-usage measure, for the current repair run only. [Runbook](DEMO.md), [work log](PROGRESS.md), and [report accounting](DECISIONS.md).
-
-1. To prepare a browser presentation, reset the existing deployment:
+1. Put the platform in its starting state: website layout `a`, the original `selectors.js`, and `prod` pointing at the original build. This takes a few seconds and keeps the agent's memory.
 
    ```sh
    npx tsx scripts/smoke.ts reset
    ```
 
-   The runbook allocates 5 minutes for preparation including this reset. It does not record the reset command's duration separately. The command restores layout `a`, the original `selectors.js`, and the original `prod` build. It keeps the agent memory. Platform cost is unrecorded. [Preparation and cleanup](DEMO.md) and [reset code](scripts/smoke.ts).
-
-2. Follow the numbered steps in [the presenter runbook](DEMO.md). Its five steps allocate 1, 1, 2, 1, and 3 minutes. A successful presentation ends with the repaired build live and the changed website still on layout `b`. It also leaves the report and investigation in storage. Platform and model costs are unrecorded. [Presenter sequence](DEMO.md).
-
-3. After the presentation, restore the starting state:
+2. Either follow the presenter runbook in [`DEMO.md`](DEMO.md) in the Apify Console, or run the unattended check:
 
    ```sh
-   npx tsx scripts/smoke.ts reset
+   npx tsx scripts/smoke.ts
    ```
 
-   Duration and platform cost are unrecorded. The command restores the site, source, and `prod` label. It keeps the saved investigation. [Cleanup](DEMO.md).
+   The unattended check performs Steps 1 to 5, asserts each result, and resets afterwards. Four recorded passes took between 92 and 142 seconds. See [the pass log](PROGRESS.md#session-3-2026-10-3031). If an assertion fails, the script stops before its final reset. Run the reset command again.
 
-For an unattended check instead of a presentation, run the smoke test, the script that performs the whole demonstration and checks its results:
+3. To record a new video, run the recorder. It resets before and after, takes about 7 minutes, and overwrites `video/self-healing-actor-demo.mp4`.
+
+   ```sh
+   cd video && npx tsx record.ts
+   ```
+
+### Update the deployed repair Actor
+
+After changing anything under `repair-actor/`, upload it and set its secret again. `apify push --force` replaces the Actor version, which drops the secret, so the second command restores it and rebuilds. See [D12](DECISIONS.md#d12-push-order-and-permissions). Together the two commands take three to five minutes.
 
 ```sh
-npx tsx scripts/smoke.ts
+cd repair-actor && apify push --force && cd ..
+npx tsx scripts/deploy.ts repair-env
 ```
 
-The runbook estimates 5 to 8 minutes. Historical passes report 92 to 142 seconds measured by the script. Neither observation guarantees the next pass's duration. The script resets before the pass and after success. It retains memory, reports, and run history. If a check fails, it can exit before the final reset. Platform and model costs are unrecorded. [Timing records](PROGRESS.md), [runbook estimate](DEMO.md), and [script sequence](scripts/smoke.ts).
+### Rebuild in another account
 
-### Update the existing deployment when needed
+The repository is not an installer. To reproduce the demo elsewhere:
 
-Skip this section if you only want to use the deployed demo. The upload commands replace platform source or settings. They are maintenance steps for the configured account. [Deployment implementation](scripts/deploy.ts).
-
-1. From the root, upload and build the repair Actor:
-
-   ```sh
-   cd repair-actor && apify push --force
-   ```
-
-   Duration and platform cost are unrecorded. This replaces the Actor version. You must configure its secret again afterwards. [Push-order decision](DECISIONS.md).
-
-2. Return to the root and configure its model key:
-
-   ```sh
-   cd .. && npx tsx scripts/deploy.ts repair-env
-   ```
-
-   Duration and platform cost are unrecorded. This stores `OPENROUTER_API_KEY` as a secret, grants `FULL_PERMISSIONS`, and rebuilds the Actor. That permission level allows access to named stores and other Actors. The command waits up to 600 seconds for the build. This limit does not predict its duration. [Secret and permission setup](scripts/deploy.ts).
-
-3. If you also need to upload the other Actors and configure the failed-run notification, run:
+1. Change `user` in [`config.ts`](config.ts) to your account name.
+2. Deploy the website, the scraper, the permanent link, and the webhook. This builds each Actor and creates the website's `variant` record if it is missing.
 
    ```sh
    npx tsx scripts/deploy.ts all
    ```
 
-   Duration and platform cost are unrecorded. This creates or updates the website, scraper, and permanent-link Actor, builds them, and configures the webhook. It creates layout `a` only if the `variant` record is absent. It builds a new scraper version labelled `prod`. It does not recreate the agent's memory or run `repair-env`. The script waits up to 300 seconds for each build. [Deployment sequence](scripts/deploy.ts).
-
-4. To restore the recorded demo's starting state after maintenance, run:
+3. Upload the repair Actor and set its secret, as in [Update the deployed repair Actor](#update-the-deployed-repair-actor).
+4. Create the agent's memory by letting it build the scraper once. The script is [`repair-actor/scripts/build-session.ts`](repair-actor/scripts/build-session.ts). It takes a few minutes, uses OpenRouter, and leaves a tested build tagged `prod`. The `--fresh` flag deletes an existing memory store, so use it only on a new account or when you intend to discard the saved investigations.
 
    ```sh
-   npx tsx scripts/smoke.ts reset
+   cd repair-actor && npx tsx scripts/build-session.ts SCRAPER_ACTOR_ID https://YOUR_ACCOUNT--shd-target-site.apify.actor/ --fresh && cd ..
    ```
 
-   Duration and platform cost are unrecorded. This points `prod` back to the recorded original build. The new scraper build stays available under its own ID. [Reset implementation](scripts/smoke.ts).
-
-### Recreate saved build notes only when necessary
-
-The build session is the initial conversation in which the agent builds the scraper, tests it, and saves its reasons and build references. Build references are copies of the page, chosen page markers, expected output, and output-checking rules. The existing demo already has this memory. The repair Actor needs it before it can investigate a failure. [Recorded build session](PROGRESS.md) and [startup requirement](repair-actor/src/main.ts).
-
-**The `--fresh` flag deletes the existing agent memory store.** Do not use it as routine preparation. It removes the saved investigations as well as the build notes. [Deletion code](repair-actor/scripts/build-session.ts).
-
-If you intend to replace that memory, first restore layout `a` with the reset command above. Then, from the root, run the recorded initialization command:
-
-```sh
-cd repair-actor && npx tsx scripts/build-session.ts ctzTh4lGVmdeKVFDl https://straightforward-under--shd-target-site.apify.actor/ --fresh
-```
-
-The script describes the duration as a few minutes. It supplies values of 40 tool calls and 30 minutes, but the build session does not enforce those limits. Its tool-call counter returns zero, and its tool setup omits the budget check used during repair. Do not treat these values as a spending cap. [Build-session settings](repair-actor/scripts/build-session.ts) and [tool setup](repair-actor/src/agent-tools.ts).
-
-The script runs locally while using platform storage, builds, scraper runs, and OpenRouter. Dollar cost is unrecorded in the published work log. On success it leaves new memory, build references, build notes, and a tested build labelled `prod`. [Build-session implementation](repair-actor/scripts/build-session.ts).
-
-The reset and recorder still refer to the old original build. Recreating memory does not update those constants. It also creates a new store ID. The agent-memory Console link in the runbook and `MEMORY_STORE` in the recorder still use the deleted store's ID. Review these references before reusing the runbook or recorder. [Store replacement](repair-actor/scripts/build-session.ts), [runbook link](DEMO.md), [smoke reset](scripts/smoke.ts), and [recorder references](video/record.ts).
-
-### Record another video only when needed
-
-From the repository root, run the recorder only if you intend to perform another live pass and replace the video:
-
-```sh
-cd video && npx tsx record.ts
-```
-
-The runbook estimates about 7 minutes. The recorder makes platform and model requests, generates speech, and writes video work files. Dollar cost is unrecorded. On success it overwrites the video and resets the website, scraper source, and `prod` label. An error can stop it before that reset. [Recording command](DEMO.md) and [recorder sequence](video/record.ts).
+   `SCRAPER_ACTOR_ID` is the scraper's Actor ID printed by the deploy command. `YOUR_ACCOUNT` is your account name with underscores replaced by hyphens, as the platform prints it.
+5. Replace the hardcoded IDs: `ORIGINAL_BUILD` in [`scripts/smoke.ts`](scripts/smoke.ts), the store and Actor IDs in [`video/record.ts`](video/record.ts), and the Console links in [`DEMO.md`](DEMO.md).
 
 ## What is real, what is simplified, what is fragile
 
@@ -243,7 +161,7 @@ The runbook estimates about 7 minutes. The recorder makes platform and model req
 
 ### What is fragile
 
-- The recorded smoke passes precede the later budget-counter and agent-web-page fixes. The successful video attempt exercises later code, but it does not replace the smoke assertions. These publication edits have local checks only. [Build and recording history](PROGRESS.md).
+- The four recorded smoke passes ran on builds 0.0.12 and 0.0.14. Later builds changed the agent web page, the budget counter, and log wording. The video recordings exercised those later builds, but no smoke pass has been repeated on them. [Build and recording history](PROGRESS.md).
 - Nobody has clicked through the complete runbook in a browser yet. Its steps have been exercised through the same API calls. You should do a dry run before presenting. [Verification limit](DECISIONS.md).
 - Anyone with the agent web page link can approve and enter a name. The run's web address needs no token. The handler records the entered name without verifying the person's identity. [Approval step](DEMO.md), [URL access](DECISIONS.md), and [approval handler](repair-actor/src/steer-server.ts).
 - Stopping a run can interrupt a model request instead of a tool call. The recorded three smoke passes do that. Completed calls stay complete. After restart, tools marked safe to repeat can run again. The code calls this replay safe. Other interrupted tools report interruption to the model. [Restart caveats](DEMO.md) and [replay rules](NOTES-research.md).
@@ -263,7 +181,6 @@ The log and source keep some technical names. Use these explanations when you en
 | Approval check, gate | Code that waits for a saved approval before the `promote` tool runs. [Approval decision](DECISIONS.md). |
 | API | The interface a program calls to use platform features such as starting a run or reading storage. [Platform calls](scripts/deploy.ts). |
 | Baseline | The original website layout, scraper source, and production build restored before a demonstration. [Reset](scripts/smoke.ts). |
-| Beat | An older name for a numbered demonstration step. [Writing history](PROGRESS.md). |
 | Build, build ID, build number | A build is packaged Actor code. Its ID identifies that build, and its build number is a version-like label such as `0.0.8`. The run API accepts a build number or tag, a label pointing to a build. [Build addressing](DECISIONS.md). |
 | Build session | The initial conversation where the agent builds and tests the scraper and saves its notes. [Build script](repair-actor/scripts/build-session.ts). |
 | Candidate, canary, test run | `candidate` labels a proposed build. A canary is the test run of that build against the live site. [Test tools](repair-actor/src/agent-tools.ts). |

@@ -149,10 +149,11 @@ Paths under `.evidence/` and `video/work/` name local log files on the builder's
   - Attempt 7 SUCCEEDED, with a plain-English script written after user feedback: "no Beat N, no jargon, explain terms". Local evidence: `.evidence/video-7.log`. It is 332 seconds and 13.1 MB. Its frames were checked: cards, log, restart, agent web page with notes, incident, and first reply, typed message, named approval, and closing card. The platform was reset to its starting state afterwards. Scene start times are in `video/work/marks.json`, local.
 - DEMO.md headings were renamed to Step 1 to 5, and a pointer to the video was added.
 
-## Publication update
+## Session 4 (2026-10-31): publication
 
-The documentation, source comments, eligible log messages, and recorder narration now use revised wording. The existing video keeps the narration from attempt 7. The recorder has not run again, so its new captions and speech are not present in the video.
-
-The smoke results above cover builds 0.0.12 and 0.0.14. Session 3b records later fixes to the budget counter and agent web page, plus the successful video pass. These publication edits do not add a live smoke pass or a browser rehearsal.
-
-The deployed Actors keep their earlier log wording until someone uploads the revised source. No publication-edit command changes the platform deployment.
+- A three-model review run (GPT-6 Astra as architect, GPT-6.1 Sol and Claude Opus 5.5 as builders, driven by the fusion-harness extension for pi) rewrote every document, source comment, log message, and the recorder narration in plain English, added `README.md`, `LICENSE`, `.env.example`, and the `--all` flag of `scripts/check-docs.mjs`. Its brief and summary are in `.evidence/`, which is not tracked. It changed no behaviour and made no platform calls. I verified that every log line the smoke script and the recorder wait for still exists in the source.
+- Hand edits after the review: the README setup section now states measured costs and timings, and sentences that referred to an "earlier runbook" or to a video with older narration are gone.
+- Unexplained platform activity: between 11:39 and 11:44 UTC a complete pass ran on the platform without the smoke script or the recorder. It built scraper 0.0.24, failed run `EndDXkiKocgeZK1sC`, and the webhook started repair run `DCpCoqaVwAXLmdBZY`, which promoted build 0.0.25. Nothing aborted it and nothing reset the platform afterwards, so the website stayed on layout `b` and `prod` pointed at 0.0.25. The recorder's reset repaired this. The review run reported no platform calls, so a Console run-through is the likely cause.
+- Push 12 uploaded the revised repair Actor source: build 0.0.20, `0GnGkdjAuof3KiOMp`, SUCCEEDED with the secret set. The deployed log wording now matches the repository.
+- Video attempt 8 SUCCEEDED on build 0.0.20 with the revised narration and captions. Local evidence: `.evidence/video-8.log`. The file is 349 seconds and 13.1 MB. The run it recorded was aborted at `Sh1C8bMc3ERBBOUHm` and resumed as `PwMgQ1uCA4ZFkrA8k`. Seven frames were checked: cards, the memory store listing, the restart screen with "some work was cut off by the previous run; resuming it now", and the agent web page proposing build 0.0.26 for approval.
+- After the recorder's final reset: website layout `a`, `prod` at build `x1nrd0s8qY8NVe6aK` (0.0.7). No smoke pass has run on build 0.0.20; the video pass is the only live evidence for it.
