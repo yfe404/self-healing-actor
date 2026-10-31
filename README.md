@@ -7,6 +7,26 @@ This demo repairs an Apify scraper after the website changes its layout. A faile
 
 ## How it works
 
+The flow in one picture. The numbered steps below give the detail.
+
+```mermaid
+flowchart TB
+    subgraph incident [1. Incident]
+        direction LR
+        A[Site changes<br/>its markup] --> B[Scraper run<br/>fails] -->|webhook| C[Repair Actor<br/>starts] --> D[Agent loads its memory:<br/>latest handoff note<br/>and every past step]
+        C -.->|aborted and restarted:<br/>continues from the last record| D
+    end
+    subgraph repair [2. Repair, every step saved as one record before it runs]
+        direction LR
+        E[Recalls why it chose<br/>.price-tag over .amount] --> F[Patches selectors,<br/>builds, tests on<br/>the live site] --> G{Named person<br/>approves?} -->|yes| H[prod moves<br/>to the fix] --> I[Writes report and<br/>a fresh handoff note]
+    end
+    M[(Key-value store: the agent's memory,<br/>every build and repair, searchable)]
+    N([Next incident, weeks later:<br/>starts from the latest note, not the original build])
+    incident --> repair
+    repair --> M
+    M -.-> N
+```
+
 1. **Change the website.** The demo hosts its own page of 20 products. Set its `variant` record from `a` to `b` to change the layout and add a cookie banner. [Website code](actors/target-site/main.js).
 2. **Run the scraper.** It checks whether enough products have prices. The changed page makes this check fail, so the run records a diagnosis and fails. [Scraper checks](actors/scraper/main.js).
 3. **Start the repair automatically.** A webhook, a platform rule that reacts to an event, starts the repair Actor when the scraper fails. It passes the scraper ID and failed run ID. [Webhook setup](scripts/deploy.ts).
