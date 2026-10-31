@@ -1,6 +1,6 @@
 # Research notes
 
-The builder agent, the AI coding agent that built this repository, wrote these notes on 2026-10-30, before it wrote any code. They record the facts the code is written against. Read them if you want to change the code. The final decisions are in [DECISIONS.md](DECISIONS.md).
+These notes were written on 2026-10-30, before any code. They record the facts the code is written against. Read them if you want to change the code. The final decisions are in [DECISIONS.md](DECISIONS.md).
 
 ## Terms used in these notes
 
@@ -27,7 +27,7 @@ The code depends on these exact versions, installed in `repair-actor/`:
 - `chord@1.4.0`, the library behind the context object that every call takes and behind the task graph
 - `apify-client@2.25.0`, Apify's JavaScript API client
 
-During the build, the builder agent kept two reference copies on its own machine. They are not part of this repository:
+Two reference copies were kept on the developer machine during the build. They are not part of this repository:
 
 - `/tmp/pi-durable-probe/package`: the npm 1.4.0 package, compiled code and README.
 - `/tmp/pi-repo/packages/durable`: the git HEAD, which is newer than 1.4.0. Its `Storage.commit` signature differs, so do not copy from it without checking.
@@ -232,5 +232,5 @@ These were written before [DECISIONS.md](DECISIONS.md) existed. That file holds 
   - `actors/target-site`, `actors/scraper`, and `actors/redirector` are single-file JavaScript Actors, deployed as `SOURCE_FILES` through `scripts/deploy.ts`. The scraper later got a second file, `selectors.js`.
   - `config.ts` at the root holds the IDs.
   - `scripts/` run locally with `tsx`.
-- Screenshots: no Chromium, because the original brief puts it out of scope. A "screenshot" is a deterministic SVG drawing of the parsed page, before and after, stored in the key-value store as `image/svg+xml`. Deterministic means it comes out the same every time. This is recorded as a simplification.
+- Screenshots: no Chromium, because it was out of scope. A "screenshot" is a deterministic SVG drawing of the parsed page, before and after, stored in the key-value store as `image/svg+xml`. Deterministic means it comes out the same every time. This is recorded as a simplification.
 - Approval: the `promote` tool is `replay:"safe"`. A `beforeTool` hook checks a `demo.approval` document on the conversation, which `POST /approve` sets. The hook waits, checking the document every 2 seconds, until someone approves. The memo survives an abort and a restart, so the agent does not ask again.

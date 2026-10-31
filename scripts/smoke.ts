@@ -137,7 +137,7 @@ async function pass(): Promise<void> {
 	const steerUrl = repair2Detail?.containerUrl ?? "";
 	log(`restarted run ${repair2.id}. New agent web page ${steerUrl}`);
 
-	// Step 4: send the agent a message from the audience.
+	// Step 4: send the agent a message while it works.
 	await until("the agent web page to answer", 90_000, async () => (await fetch(steerUrl).then((r) => r.status).catch(() => 0)) === 200);
 	const steer = await fetch(`${steerUrl}/steer`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text: STEER_TEXT }) });
 	assert(steer.status === 200, `step 4: message accepted: ${await steer.text()}`);
@@ -156,7 +156,7 @@ async function pass(): Promise<void> {
 	assert(/PROMOTED: prod -> build (\S+)/.test(log2), "production build label now points to the fix");
 	const report = (await client.dataset(repair2Detail!.defaultDatasetId).listItems()).items[0] as Record<string, unknown> | undefined;
 	assert(report?.outcome === "promoted" && report.approvedBy === "smoke", `report in the dataset: outcome=${report?.outcome} approvedBy=${report?.approvedBy} elapsed=${report?.elapsedSeconds}s CU=${report?.computeUnitsThisRun}`);
-	log(`report ${/cookie/i.test(JSON.stringify(report)) ? "mentions" : "does NOT mention"} the cookie banner from the audience message`);
+	log(`report ${/cookie/i.test(JSON.stringify(report)) ? "mentions" : "does NOT mention"} the cookie banner from the message`);
 	const green = await client.actor(SCRAPER).call({}, { build: CONFIG.buildTag, waitSecs: 240 });
 	assert(green.status === "SUCCEEDED", `next scraper run ${green.id} on prod (build ${green.buildNumber}) is green`);
 	log(`PASS in ${((Date.now() - t0) / 1000).toFixed(0)}s: red ${red.id}, repair ${repair1.id} -> ${repair2.id}, green ${green.id}, memory store ${agentStoreName((await client.actor(SCRAPER).get())!.id)}`);

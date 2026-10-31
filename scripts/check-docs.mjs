@@ -14,10 +14,11 @@ const files = [...new Set(execSync(listCommand, { cwd: root, encoding: "utf8" })
 	.split("\0")
 	.filter(Boolean))];
 
-// Words the audience does not know. Each must be explained where it is used or avoided.
+// Wording this repository does not allow in its documents.
 const banned = [
 	[/\bBeats? [1-5]\b/, "use 'Step N', not 'Beat N'"],
 	[/—/, "no em dashes"],
+	[/\b(presenter|presentation|audience|runbook|rehears\w*|dry run|on stage|what to say)\b/i, "this is documentation, not a script for a talk"],
 	[/\b(seamless(ly)?|leverage[sd]?|robust|cutting[- ]edge|game[- ]chang\w+|delve|unlock(s|ed)?|empower(s|ed)?|supercharge)\b/i, "marketing word"],
 	[/\b(it'?s worth noting|in today's|at the end of the day|needless to say)\b/i, "filler phrase"],
 	[/\bnot (only|just) [^.]{0,60} but (also )?/i, "'not X but Y' contrast"],

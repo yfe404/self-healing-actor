@@ -53,7 +53,7 @@ A Standby Actor stays running as a web server at a fixed URL, its Standby URL. T
 
 ## D8: screenshots are drawn without Chromium
 
-The original brief puts Chromium, a headless browser, out of scope. So "screenshot" here means a deterministic SVG drawing of the parsed page. Deterministic means it comes out the same every time. The drawings are stored in the agent memory store as `image/svg+xml`, one before and one after. They show the missing price and the cookie banner on top of the list. [DEMO.md](DEMO.md) states this.
+Chromium, a headless browser, was out of scope. So "screenshot" here means a deterministic SVG drawing of the parsed page. Deterministic means it comes out the same every time. The drawings are stored in the agent memory store as `image/svg+xml`, one before and one after. They show the missing price and the cookie banner on top of the list. [DEMO.md](WALKTHROUGH.md) states this.
 
 ## D9: models are reached through OpenRouter
 
@@ -90,7 +90,7 @@ A repair run that was aborted and never restarted leaves work behind. Its submis
 
 To prevent this, `main.ts` now aborts every submission whose request id is not the failed run id of this run. It does this before it touches the new incident. Only the current incident is resumed.
 
-Restarting a run with the same input, as in Step 3 of the runbook, still works. That path uses the same failed run id, so this change does not affect it.
+Restarting a run with the same input, as in Step 3 of the walkthrough, still works. That path uses the same failed run id, so this change does not affect it.
 
 ## D14: the run API wants a build tag or a build number
 
@@ -102,21 +102,14 @@ The report's `elapsedSeconds` counts from `computedAt` in the incident record. T
 
 Compute units are per run, reported as `computeUnitsThisRun` and read from the run object. Compute units are how Apify measures the resources a run used. Summing them across restarts was not worth the extra API calls.
 
-## D16: nobody has clicked through the runbook in a browser
+## D16: the Console steps were tested through the API
 
-The builder agent is the AI coding agent that built this repository. It tested the Console steps of [DEMO.md](DEMO.md) through the same API endpoints the Console buttons call:
-
-- start
-- abort
-- start again with the same input
-- the run's container URL, to send a message and to approve
-
-Nobody has clicked through DEMO.md in a browser yet. The presenter should do one dry run.
+The steps in [WALKTHROUGH.md](WALKTHROUGH.md) were exercised through the same API endpoints the Console buttons call: start, abort, start again with the same input, and the run's container URL to send a message and to approve. Nobody has clicked through them in a browser yet.
 
 ## D17: the demo video is a recording of a real pass
 
 [video/record.ts](video/record.ts) records a live pass of Steps 1 to 5 with a headless Chromium. What you see is real: the real site, real logs from the API, and the real agent web page, typed into and clicked.
 
-The narration is synthesized speech, made from fixed text with edge-tts, a text-to-speech tool. It is placed at the recorded start time of each scene. Nothing is staged except the title, cast, and closing cards.
+The narration is synthesized speech, made from fixed text with edge-tts, a text-to-speech tool. It is placed at the recorded start time of each scene. Nothing is staged except the title, overview, and closing cards.
 
 The recorder also draws local views of the layout change, page pictures, memory store, and report. Those views use live platform data. They do not show the Console interface itself. See the [recorder's scene code](video/record.ts).
