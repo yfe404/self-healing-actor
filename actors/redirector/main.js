@@ -1,5 +1,5 @@
-// A stable link for the demo: finds the currently running repair run and redirects to its container URL
-// (the steer-and-watch page). Standby Actor, so the URL never changes.
+// The permanent link opens the agent web page served by the current repair run.
+// Apify's Standby mode starts this web server on request, so you keep the same link between repair runs.
 import http from "node:http";
 import { Actor } from "apify";
 import { ApifyClient } from "apify-client";

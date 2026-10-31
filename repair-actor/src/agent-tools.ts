@@ -1,7 +1,7 @@
-// The agent's tools. Reads are `replay: "safe"`. Writes are absolute-state (full file list, a build of a
-// version, a tag pointing at one build id, a record under one key), so a replay or a repeat yields the same
-// end state. `promote` is replay-safe on purpose: the approval gate in front of it is a committed document,
-// so a run killed after approval and before promotion resumes straight through without asking again.
+// The agent uses these tools to read pages, change code, test it, and put an approved fix live.
+// `replay: "safe"` lets the framework repeat a tool call after a restart. Writes specify the full target
+// state: a file list, a build of a version, a label pointing to a build, or a record under one key.
+// The `promote` approval check reads a saved record. After approval, a restarted run proceeds without asking again.
 import type { Context } from "@earendil-works/chord";
 import { Type } from "@earendil-works/pi-ai";
 import { defineDoc, defineExtension, defineTool, hook, section, ToolTask } from "@earendil-works/pi-durable";
@@ -22,18 +22,18 @@ import {
 
 export type ToolEnv = {
 	scraperActorId: string;
-	/** Empty during the build session. */
+	/** Empty while the agent first builds the scraper and saves its notes. */
 	failedRunId: string;
 	targetUrl: string;
 	fixtures: FixtureStore;
 	log: (line: string) => void;
-	/** Stops the run once a budget is exceeded. `toolCallsSoFar` counts committed tool results in the conversation. */
+	/** Stops the run at its limit. `toolCallsSoFar` counts tool results saved in the conversation transcript. */
 	budget: { maxToolCalls: number; maxElapsedMs: number; startedAt: number; toolCallsSoFar: (conversationId: unknown) => Promise<number> };
 };
 
 const text = (value: unknown) => [{ type: "text" as const, text: typeof value === "string" ? value : JSON.stringify(value, null, 2) }];
 
-/** Approval for promotion. Written by POST /approve, read by the gate hook; survives abort/resume as a commit. */
+/** POST /approve saves this approval record. The approval check reads it again after a restart. */
 export const ApprovalDoc = defineDoc<{ approved: boolean; by: string; at: string; buildId: string }>({
 	kind: "demo.approval",
 	version: 1,
@@ -44,7 +44,7 @@ export const ApprovalDoc = defineDoc<{ approved: boolean; by: string; at: string
 	checkpointWhen: () => true,
 });
 
-/** What the steer page shows as the agent's own status line; the agent updates it with `set_status`. */
+/** The agent web page shows this status line. The agent updates it with `set_status`. */
 export const StatusDoc = defineDoc<{ phase: string; note: string; proposedBuildId: string }>({
 	kind: "demo.status",
 	version: 1,
@@ -77,7 +77,7 @@ export function pageTools(env: ToolEnv) {
 			const html = await fetchTargetPage(env.targetUrl);
 			const htmlUrl = await env.fixtures.put(FIXTURE.html, html, "text/html; charset=utf-8");
 			const svgUrl = await env.fixtures.put(FIXTURE.screenshot, renderPageSvg(html, args.label), "image/svg+xml");
-			env.log(`fixture stored: ${htmlUrl} and ${svgUrl}`);
+			env.log(`reference saved: ${htmlUrl} and ${svgUrl}`);
 			return { output: text({ stored: [FIXTURE.html, FIXTURE.screenshot], htmlUrl, svgUrl, facts: pageFacts(html, {}) }) };
 		},
 	});
@@ -103,7 +103,7 @@ export function pageTools(env: ToolEnv) {
 		execute: async (args) => {
 			if (!(Object.values(FIXTURE) as string[]).includes(args.name)) return { isError: true, output: text(`unknown fixture name ${args.name}`) };
 			const url = await env.fixtures.put(args.name, args.value as object, "application/json");
-			env.log(`fixture stored: ${url}`);
+			env.log(`reference saved: ${url}`);
 			return { output: text({ stored: args.name, url }) };
 		},
 	});
@@ -243,7 +243,7 @@ export function promotionTools(env: ToolEnv) {
 		}),
 		execute: async (args, api, context) => {
 			const approval = await api.snapshot(ApprovalDoc, api.conversationId, context);
-			// Elapsed counts from the incident (the diff bundle), across every run that worked on it, not just this one.
+			// Elapsed time starts when the page comparison records the failure. It includes earlier repair runs.
 			const incident = (await env.fixtures.get(`incident-${env.failedRunId}`))?.value as { computedAt?: string } | undefined;
 			const since = incident?.computedAt ? Date.parse(incident.computedAt) : env.budget.startedAt;
 			const thisRun = process.env.ACTOR_RUN_ID ? await client.run(process.env.ACTOR_RUN_ID).get() : undefined;
@@ -264,8 +264,8 @@ export function promotionTools(env: ToolEnv) {
 		},
 	});
 
-	// The gate: `promote` waits here until the approval document says yes. A killed run resumes into the same
-	// wait (promote is replay-safe), and an already-approved document lets it through without asking again.
+	// The approval check makes `promote` wait for a saved approval record.
+	// A restarted run can repeat `promote`. A saved approval lets it proceed without asking again.
 	const gate = hook(ToolTask, {
 		beforeTool: async (call, api, context) => {
 			if (call.name !== "promote") return undefined;
@@ -289,7 +289,7 @@ export function promotionTools(env: ToolEnv) {
 		},
 	});
 
-	// Hard budget: counts tool calls, refuses them past the limit so the model writes the report and stops.
+	// Count tool calls and refuse further calls at the limit, so the model writes the report and stops.
 	const budget = hook(ToolTask, {
 		beforeTool: async (call, api, context) => {
 			const elapsed = Date.now() - env.budget.startedAt;

@@ -1,5 +1,5 @@
-// Fixtures live in the agent's own KV store next to the commit log, under `fixture-*` keys, so large things
-// (page HTML, the SVG screenshot) are their own records and never sit inside a commit.
+// Saved build references use `fixture-*` keys in the agent's key-value store.
+// Keep large files, such as page HTML and the drawn page picture, outside the records of saved steps.
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { client, self } from "./platform.js";

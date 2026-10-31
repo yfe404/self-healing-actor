@@ -1,7 +1,7 @@
-// The repair Actor. Opens the durable harness over the agent's KV store, prints the task tree (what was
-// finished, what was interrupted), serves the steer page, computes the diff bundle with plain code, and
-// wakes the agent on a fork of the build conversation. `probe` mode runs only a slow dummy tool, to
-// demonstrate abort and resume.
+// The repair Actor loads the agent's saved steps from its key-value store through the agent framework.
+// It prints completed and interrupted work, serves the agent web page, and computes the page comparison.
+// The repair conversation shares the history and saved build notes from the initial scraper build.
+// `probe` mode uses a slow test tool to demonstrate stopping and restarting the run.
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { Type } from "@earendil-works/pi-ai";
 import { AssistantEntry, createRegistry, defineExtension, defineTool, Harness, type Conversation } from "@earendil-works/pi-durable";
@@ -24,13 +24,13 @@ if (!input.actorId || !input.failedRunId) throw new Error("input needs actorId a
 const targetUrl = input.targetUrl ?? TARGET_URL;
 
 log("================= SHD repair agent =================");
-log(`steer & watch (this run only):   ${self.webUrl}`);
-log(`stable link (redirects to the live run): ${REDIRECTOR_URL}?token=<your Apify token>`);
+log(`agent web page (this run only):   ${self.webUrl}`);
+log(`permanent link (opens the live run): ${REDIRECTOR_URL}?token=<APIFY_TOKEN>`);
 log(`scraper actor ${input.actorId}; failed run ${input.failedRunId}${self.runId ? `; this run ${runUrl(self.runId)}` : ""}`);
 
 const other = await otherOwnerRunning(input.actorId);
 if (other) {
-	log(`another repair run (${other}) already owns the memory store for ${input.actorId}; exiting.`);
+	log(`another repair run (${other}) already uses the memory store for ${input.actorId}. Exiting.`);
 	await Actor.exit();
 	process.exit(0);
 }
@@ -57,12 +57,12 @@ const env: ToolEnv = {
 	},
 };
 
-// --- probe mode tools: one slow tool, so an abort in the middle is visible and the resume is provable ---------
+// Test mode uses a slow tool so you can see where a stopped run continues after a restart.
 const slowSteps = defineTool({
 	name: "slow_steps",
 	description: "Does n slow steps of 10 seconds each and reports which ones it finished.",
 	parameters: Type.Object({ n: Type.Number() }),
-	// Not replay-safe on purpose: after a crash the model must get an `interrupted` result, not a rerun.
+	// Do not repeat this tool after a crash. The model receives an `interrupted` result.
 	execute: async (args, api) => {
 		for (let i = 1; i <= args.n; i++) {
 			await new Promise((resolve) => setTimeout(resolve, 10_000));
@@ -126,16 +126,16 @@ if (input.mode === "probe") {
 	);
 	log(`probe submission #${String(submission.id)} admitted (request probe-${input.failedRunId}); waiting for the answer`);
 	const settled = await submission.wait(context);
-	log(`probe settled: ${settled.status}`);
+	log(`probe request finished: ${settled.status}`);
 	if (settled.status === "done" && settled.type === "input") {
 		const answer = await root.commit((tx) => tx.entry(AssistantEntry, settled.answer), context);
 		log(`answer: ${JSON.stringify(answer?.model?.[0] ?? answer)}`);
 	}
 } else {
-	// Which conversation handles this incident? One fork of the build conversation per failed run, remembered
-	// in the store so a restarted run finds it instead of forking again.
-	// One investigation at a time: a submission left behind by another incident (its run was aborted and never
-	// restarted) is abandoned here, so only this incident's work is resumed.
+	// Each failed run gets a repair conversation that shares the initial build conversation's history.
+	// Save the conversation ID so a restarted run finds the same investigation.
+	// Abandon pending requests from other failures whose repair runs stopped and never restarted.
+	// Only the current failure's investigation continues.
 	for (const stale of inspection.submissions as readonly { id: unknown; conversationId: unknown; requestId?: string }[]) {
 		if (stale.requestId === input.failedRunId) continue;
 		const staleConversation = await harness.conversation(stale.conversationId as never, context);
@@ -150,14 +150,14 @@ if (input.mode === "probe") {
 		repairConversation = await harness.conversation(mapping.conversationId as never, context);
 		log(`resuming investigation in conversation #${mapping.conversationId} (fork of the build conversation #${String(root.id)})`);
 	} else {
-		// Beat 2 (a): the diff bundle, computed by plain code before any model call.
+		// Step 2: plain code computes the page comparison before any model call.
 		const bundle = await computeDiffBundle({ failedRunId: input.failedRunId, targetUrl, fixtures, log });
 		const last = (await root.entries({}, 1, undefined, context)).items[0];
 		if (!last) throw new Error("the build conversation is empty: run the build session first");
 		repairConversation = await root.fork(last.id, { ownership: { kind: "ownerless" }, agent: { model: MODELS.fix } }, context);
 		await fixtures.put(mappingKey, { conversationId: repairConversation.id, forkedAt: last.id, bundleKey: `incident-${input.failedRunId}` }, "application/json");
 		log(`forked the build conversation #${String(root.id)} at entry #${String(last.id)} into conversation #${String(repairConversation.id)}; the agent sees its own handoff note first`);
-		// The incident goes in as a platform entry (kind apify.incident), not as a user message.
+		// Record the failure as a platform entry with kind `apify.incident`. It has its own source label.
 		await repairConversation.submit(
 			{
 				requestId: input.failedRunId,
@@ -170,11 +170,11 @@ if (input.mode === "probe") {
 		log(`incident submitted (request id = failed run id ${input.failedRunId}); waking the agent`);
 	}
 	if (!repairConversation) throw new Error("no repair conversation");
-	// Same request id on a resumed run returns the existing submission; its wait resolves when the agent is done.
+	// The same request ID returns the existing request after a restart. Wait for the agent to finish.
 	const submission = await repairConversation.submit({ requestId: input.failedRunId, type: "input", content: "(resubmitted)" }, context);
 	log(`waiting for the agent to finish (submission #${String(submission.id)})`);
 	const settled = await submission.wait(context);
-	log(`investigation settled: ${settled.status}`);
+	log(`investigation finished: ${settled.status}`);
 	await repairConversation.waitForIdle(context);
 }
 

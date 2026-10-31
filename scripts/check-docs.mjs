@@ -1,15 +1,18 @@
 #!/usr/bin/env node
-// Checks every tracked Markdown file for broken relative links, leftover jargon,
-// and the writing patterns this repo forbids. Exit 1 on any finding.
-// Usage: node scripts/check-docs.mjs [--all]   (default: files tracked by git)
+// Check tracked Markdown for broken relative links and forbidden writing patterns. Exit 1 on any finding.
+// Usage: node scripts/check-docs.mjs [--all]
+// --all also checks untracked Markdown unless git ignores it. The original project brief stays unchanged.
 import { execSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 
 const root = resolve(dirname(new URL(import.meta.url).pathname), "..");
-const files = execSync("git ls-files '*.md'", { cwd: root, encoding: "utf8" })
-	.split("\n")
-	.filter((f) => f && f !== "self-healing-actor-demo-prompt.md"); // the original brief stays verbatim
+const listCommand = process.argv.includes("--all")
+	? "git ls-files --cached --others --exclude-standard -z -- '*.md'"
+	: "git ls-files -z -- '*.md'";
+const files = [...new Set(execSync(listCommand, { cwd: root, encoding: "utf8" })
+	.split("\0")
+	.filter((f) => f && f !== "self-healing-actor-demo-prompt.md"))];
 
 // Words the audience does not know. Each must be explained where it is used or avoided.
 const banned = [

@@ -1,7 +1,7 @@
-// Records a narrated demo video of Beats 1-5 running live on the Apify platform.
-// Usage: APIFY_TOKEN=.. npx tsx record.ts            -> self-healing-actor-demo.mp4 in this directory
-// Real things on screen: the target site, the run logs (fetched from the Apify API), the agent's KV store,
-// the steer page served by the repair run (typed into and clicked like a person would). Cards are local HTML.
+// Record a narrated video of Steps 1 to 5 on the live Apify platform.
+// Usage: APIFY_TOKEN=YOUR_TOKEN npx tsx record.ts -> self-healing-actor-demo.mp4 in this directory
+// YOUR_TOKEN is your Apify API token. The recording shows the real target site, API run logs,
+// agent key-value store, and agent web page. Local cards display text and live platform data.
 import { execFile } from "node:child_process";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -45,24 +45,24 @@ const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replac
 // ---------------------------------------------------------------- narration -----------------------------------
 type Scene = { id: string; caption: string; narration: string };
 const SCENES: Scene[] = [
-	{ id: "title", caption: "A scraper on Apify that fixes itself when the website changes", narration: "This is a demo of a scraper on Apify that fixes itself. The website it scrapes changes, the scraper breaks, and an AI agent, a program that uses a language model plus a set of tools, wakes up, works out what changed, fixes the scraper, and asks a person for approval before the fix goes live. Everything you will see runs on the Apify platform. Nothing runs on a laptop." },
-	{ id: "cast", caption: "Four pieces: the website, the scraper, the repair agent, and a web page to talk to it", narration: "Four pieces. The website is a page of twenty products that we host ourselves, so we can change it on purpose. The scraper is an ordinary Apify Actor; its scheduled runs use the version of the code labelled prod, short for production. The repair agent is another Actor. Its memory lives in an Apify key-value store, a simple place to keep named records, with one record for every step it takes. And a web page, served by the repair agent while it runs, where anyone with the link can watch it work, send it a message, and approve its fix." },
-	{ id: "site-a", caption: "The website as the agent first saw it: each product has a name, a price, and a rating", narration: "Here is the website as it looked when the agent first built the scraper. Each product has a name, a price in an element marked price tag, and a rating." },
-	{ id: "flip", caption: "Step 1: the website owner changes the page layout", narration: "Step one. The website owner changes the layout. In this demo that is one setting, changed by someone other than the presenter." },
-	{ id: "site-b", caption: "The new layout: the price is marked differently, and a cookie banner covers the list", narration: "The page now looks like this. The price tag marker is gone, the price is split into new pieces, and a cookie banner covers the list. Nothing else was touched." },
-	{ id: "red", caption: "The scraper's scheduled run fails: it found no prices", narration: "The scraper's scheduled run starts. It checks its own results before finishing. Every price is missing, so instead of quietly delivering bad data it stops, records why, and shows up red in the Apify console." },
-	{ id: "repair-log", caption: "Step 2: the failed run automatically starts the repair agent. First, plain code lists what changed", narration: "Step two. The failed run automatically starts the repair agent. Watch its log. First it prints the links where people can reach it. Then it loads its memory from the key-value store. Then, before asking the language model anything, plain code compares the page with the copy the agent saved when it built the scraper: which markers are gone, which scripts and names are new, how many prices the failed run found, and a pair of before and after pictures. Only then is the agent given the case." },
-	{ id: "shots", caption: "Before and after pictures of the page", narration: "The before and after pictures are drawn from the page's code. The cookie banner and the new price layout are visible at a glance." },
-	{ id: "abort", caption: "Step 3: someone stops the repair run while the agent is in the middle of its work", narration: "Step three. While the agent is rebuilding the scraper, a skeptic stops the run from the console. The computer running the agent is killed in the middle of a step." },
-	{ id: "memory", caption: "The agent's memory is a key-value store: one record per step, plus the saved page and the case file", narration: "The run is gone. The memory is not. This is the agent's key-value store in the console: one record for every step it took, a summary record every twenty-five steps so it starts quickly, the copy of the page it saved when it built the scraper, and the case file written a minute ago. Each record is plain readable text." },
-	{ id: "resume", caption: "The presenter starts the repair agent again with the same input: it picks up where it left off", narration: "The presenter starts the repair agent again with the same input. On startup it prints what was finished and what was in progress when it was killed. The interrupted step is marked as interrupted and redone; everything that was finished stays finished. It picks up the same case where it left off. The link to its web page changed, because it is a new run, so there is also a permanent link that always points to the current run." },
-	{ id: "steer-first", caption: "The agent's web page: its own notes from when it built the scraper, the case file, and its first reply", narration: "This is the agent's web page, served by the new run. Because the memory is shared, it shows everything from before the stop. The first entry is the note the agent wrote to itself when it built the scraper. Then the case file, which came from the platform, not from a person. Then the agent's first reply. It remembers that it chose the price tag marker back then and rejected another one called amount, because amount only appeared on seven of twenty products. That reasoning comes from its own notes, not from anything we wrote for the demo." },
-	{ id: "steer", caption: "Step 4: someone in the audience sends the agent a message while it works", narration: "Step four. Someone in the audience opens the permanent link in their own browser and types a message: the site also added a cookie banner, handle it. The message is saved to the agent's memory, and the agent reads it at its next step without interrupting what it is doing." },
-	{ id: "gate", caption: "Step 5: the agent fixes the code, builds it, tests it on the live site, then waits for a person to approve", narration: "Step five. The agent changes the scraper's code, builds it, runs the new build once against the live website as a test, and compares the result with the sample it saved when it built the scraper. Then it asks for approval. The tool that puts the fix into production only works after a person has approved. The agent cannot do it on its own." },
-	{ id: "approve", caption: "A person approves from the web page; the approval is saved, so even a crash would not ask twice", narration: "A person clicks approve and gives their name. The approval is saved in the agent's memory, so even if the run crashed right now, the next run would carry on and put the fix live without asking again. The production label now points at the new build." },
-	{ id: "report", caption: "The run ends with a short report", narration: "The run ends with a short report: what changed on the site, what the agent did, who approved and when, how long it took including the restart, and how much compute it used." },
-	{ id: "green", caption: "The scraper's next scheduled run works again", narration: "The scraper's next scheduled run works again, with every price filled in." },
-	{ id: "close", caption: "Why this matters", narration: "Without this, a broken scraper is a red run and a ticket for a developer. With it, the platform works out what changed for free, the agent that built the scraper wakes up with its own notes, people can watch it, stop it, restart it, and talk to it from a browser, and nothing goes live without a named person approving. Two things are simplified in this demo: the before and after pictures are drawn from the page's code rather than taken with a browser, and the website is one we control. Everything else is real." },
+	{ id: "title", caption: "A scraper repair demo on Apify, with human approval before the fix goes live", narration: "This demo shows an AI agent repairing a scraper on Apify. The agent uses a language model and tools. When the website changes, the scraper fails. The agent works out what changed and fixes the code. A person approves before the fix goes live. The website, scraper, and repair agent run on Apify. A local recorder shows you their work." },
+	{ id: "cast", caption: "Four pieces: the website, the scraper, the repair agent, and the agent web page", narration: "The website is a page of twenty products that we host ourselves. We can change its layout on purpose. The scraper is an Apify Actor. Its scheduled runs use a build, a packaged version of the code, labelled prod for production. The repair agent is another Actor. Its memory lives in an Apify key-value store, which holds named records. It saves one record per step. The agent web page lets anyone with the link watch, send a message, and approve a fix." },
+	{ id: "site-a", caption: "The original page: each product has a name, a price, and a rating", narration: "This is the page layout the agent sees when it first builds the scraper. Each product has a name, a price, and a rating. The page marks the price element with the name price tag." },
+	{ id: "flip", caption: "Step 1: the website owner changes the page layout", narration: "Step one. The website owner changes one setting to switch the layout. During a presentation, someone other than the presenter makes this change. This unattended recording uses the Apify API, the interface programs use to send platform requests." },
+	{ id: "site-b", caption: "The new layout changes the price element and adds a cookie banner over the list", narration: "The price tag marker is gone. The page splits the price into new pieces and adds a cookie banner over the list. The scraper code stays unchanged." },
+	{ id: "red", caption: "The scraper run fails because it finds no prices", narration: "The recorder starts the scraper to represent a scheduled run. The scraper checks its own results before finishing. Every price is missing, so it stops and records why. You see a failed run in Apify Console." },
+	{ id: "repair-log", caption: "Step 2: the failed run starts the repair agent. Plain code lists the page changes first", narration: "Step two. The failed run starts the repair agent. Watch its log. The agent prints its web links and loads its memory from the key-value store. Plain code computes a page comparison before the model receives the incident, the stored information about this failure. It compares the live page with build references, the page copy and chosen element markers from the initial build. You see missing page markers, new scripts and names, the failed run's price results, and before and after pictures." },
+	{ id: "shots", caption: "Before and after pictures drawn from the page code", narration: "The recorder shows before and after pictures drawn from the page code. These are generated drawings rather than browser screenshots. You can see the cookie banner and the changed price layout." },
+	{ id: "abort", caption: "Step 3: stop the repair run while the agent works", narration: "Step three. The recorder stops the repair run while the agent works. This sends the same request as Abort in Apify Console. The computer running the agent stops in the middle of its work." },
+	{ id: "memory", caption: "The key-value store keeps saved steps, build references, and the incident", narration: "The key-value store keeps the agent's memory after the run stops. You see one record per saved step. Every twenty-five steps, a combined record holds all steps so far to reduce startup reads. The store also keeps build references and the incident. You can read each record as text." },
+	{ id: "resume", caption: "Restart the repair agent with the same input to continue the investigation", narration: "The recorder starts the repair agent again with the same input. The run prints the status of saved work before it continues. The agent framework, the code that manages the agent's work, can repeat tools marked safe to repeat. It reports other interrupted tools to the model. Finished tool calls stay finished. The investigation keeps the same conversation transcript. Each run has its own agent web page address. The permanent link keeps one address and opens the current repair run when one is active." },
+	{ id: "steer-first", caption: "The agent web page shows saved build notes, the incident, and the first reply", narration: "The new run serves the agent web page. Shared memory lets you see entries from before the stop. First come the agent's saved build notes, the note it writes during the initial scraper build. Then you see the platform's incident and the agent's first reply. The agent recalls why it chose the price tag marker. It rejected amount because that marker appears on seven of twenty products. The reasoning comes from its saved build notes." },
+	{ id: "steer", caption: "Step 4: send the agent a message while it works", narration: "Step four. An audience member can open the permanent link and send a message. The recorder types: the site also added a cookie banner, handle it. The agent saves the message in memory. It reads the message before its next response without interrupting its current work." },
+	{ id: "gate", caption: "Step 5: the agent fixes and tests the code, then waits for approval", narration: "Step five. The agent changes the scraper code and builds it. A test run uses the new build against the live website. The agent compares the result with its build references. The approval check then waits for a person. The tool that puts the fix live requires a saved approval record." },
+	{ id: "approve", caption: "Approve on the agent web page. The saved approval survives a restart", narration: "The recorder clicks Approve and enters a person's name. The agent saves the approval in memory. If the run stops after approval, a restart can put the fix live without asking again. The production build label now points to the new build." },
+	{ id: "report", caption: "The run ends with a repair report", narration: "The report lists the site's changes, the agent's actions, the approver's name, and the approval time. It includes elapsed time across the restart and the compute used by this run." },
+	{ id: "green", caption: "The next scraper run works with prices filled in", narration: "The recorder starts the scraper again to represent its next scheduled run. The scraper succeeds with every price filled in." },
+	{ id: "close", caption: "The repair process and its demo simplifications", narration: "A failed scraper run starts a repair investigation. Plain code lists page changes without a model call. The agent uses its saved build notes to fix and test the scraper. You can watch, stop, restart, and message it from a browser. The approval check requires a saved approval before the fix goes live. The demo uses a website we control and draws page pictures from its code. The recording uses live platform data and automates the presentation actions." },
 ];
 const audio = new Map<string, { file: string; seconds: number }>();
 for (const s of SCENES) {
@@ -73,7 +73,7 @@ for (const s of SCENES) {
 			break;
 		} catch (error) {
 			if (attempt >= 4) throw error;
-			log(`tts retry ${attempt} for ${s.id}`);
+			log(`speech generation retry ${attempt} for ${s.id}`);
 			await sleep(3000 * attempt);
 		}
 	}
@@ -134,11 +134,11 @@ async function scene(id: string, action: (s: Scene) => Promise<void>, minSeconds
 const show = async (html: string) => page.setContent(html, { waitUntil: "load" });
 const showCard = (body: string) => show(card(body, current!.caption));
 async function liveLog(runId: string, title: string, done: (text: string) => boolean, maxMs: number, tail = 38): Promise<string> {
-	await show(termPage(title, ["(waiting for the run to start)"], current!.caption, tail));
+	await show(termPage(title, ["Waiting for the run to start"], current!.caption, tail));
 	return until(`log of ${runId}`, maxMs, async () => {
 		const text = await runLog(runId);
 		const lines = cleanLog(text);
-		await show(termPage(title, lines.length ? lines : ["(container starting…)"], current!.caption, tail));
+		await show(termPage(title, lines.length ? lines : ["Starting the run's computer…"], current!.caption, tail));
 		return done(text) ? text : undefined;
 	}, 2500);
 }
@@ -181,13 +181,13 @@ await show(card("<h1></h1>", ""));
 await sleep(600);
 videoStart = Date.now();
 
-await scene("title", async () => showCard(`<h1>A scraper that fixes itself</h1><p>When the website changes, an AI agent on Apify finds out what changed, fixes the scraper, and asks a person before the fix goes live.</p><p style="color:#9ecbff">Recorded live and unattended. Every action is an Apify API call or a click on the agent's own web page.</p>`));
+await scene("title", async () => showCard(`<h1>A scraper repair demo</h1><p>When the website changes, an AI agent on Apify identifies the page changes, fixes the scraper, and asks a person before the fix goes live.</p><p style="color:#9ecbff">Recorded live and unattended. The recorder sends requests to Apify and clicks the agent web page.</p>`));
 await scene("cast", async () =>
-	showCard(`<h1>The cast</h1><div class="grid">
+	showCard(`<h1>The four pieces</h1><div class="grid">
 <div class="box"><h3>The website</h3><p>A page of 20 products that we host ourselves. One setting switches it between the old layout and the new one.</p></div>
-<div class="box"><h3>The scraper</h3><p>An ordinary Apify Actor. Its scheduled runs use the code version labelled <code>prod</code> (production). It checks its own results.</p></div>
-<div class="box"><h3>The repair agent</h3><p>Another Actor: a language model with tools. Its memory is an Apify key-value store, one record per step. A failed scraper run starts it automatically.</p></div>
-<div class="box"><h3>The web page</h3><p>Served by the repair agent while it runs: watch it work live, send it a message, approve its fix.</p></div></div>`),
+<div class="box"><h3>The scraper</h3><p>An Apify Actor that checks its own results. Scheduled runs use the build labelled <code>prod</code>, short for production. A build packages the code for a run.</p></div>
+<div class="box"><h3>The repair agent</h3><p>Another Actor: a language model with tools. Its memory is an Apify key-value store, which holds named records. A failed scraper run starts it.</p></div>
+<div class="box"><h3>The agent web page</h3><p>The repair agent serves this page while it runs. You can watch it work, send it a message, and approve its fix.</p></div></div>`),
 );
 await scene("site-a", async () => {
 	await page.goto(`${SITE}?token=${token}`, { waitUntil: "load" });
@@ -198,7 +198,7 @@ await scene("flip", async () => {
 	const before = await site("variant");
 	const after = await site("variant?set=b");
 	failedAt = Date.now();
-	await showCard(`<h1>Step 1: the website owner changes the layout</h1><p>One setting in a key-value store: record <code>variant</code>, a = old layout, b = new layout</p><div class="json">before: ${esc(before)}\nafter:  ${esc(after)}</div><p style="color:#9ecbff">In the Apify console: open the store, click the record, change "a" to "b", save.</p>`);
+	await showCard(`<h1>Step 1: the website owner changes the layout</h1><p>The <code>variant</code> record selects the layout: a = old, b = new.</p><div class="json">before: ${esc(before)}\nafter:  ${esc(after)}</div><p style="color:#9ecbff">In Apify Console:</p><ol><li>Open the store.</li><li>Open the <code>variant</code> record.</li><li>Change "a" to "b".</li><li>Save the record.</li></ol>`);
 });
 await scene("site-b", async () => {
 	await page.goto(`${SITE}?token=${token}`, { waitUntil: "load" });
@@ -223,21 +223,21 @@ await scene("repair-log", async () => {
 			await client.run(repair1!.id).abort();
 			log(`aborted ${repair1!.id} at the abort point`);
 		});
-	await liveLog(repair1.id, `Repair run ${repair1.id}, started automatically by the failed run  [Apify console > Runs > Log]`, (t) => t.includes("waking the agent"), 120_000);
+	await liveLog(repair1.id, `Repair run ${repair1.id}, started automatically by the failed run  [Apify Console > Runs > Log]`, (t) => t.includes("waking the agent"), 120_000);
 	await sleep(4000);
 });
 await scene("shots", async () => {
 	const before = await fetch(`https://api.apify.com/v2/key-value-stores/${MEMORY_STORE}/records/fixture-screenshot.svg`, { headers: { authorization: `Bearer ${token}` } }).then((r) => r.text());
 	const after = await fetch(`https://api.apify.com/v2/key-value-stores/${MEMORY_STORE}/records/incident-${redId}-screenshot.svg`, { headers: { authorization: `Bearer ${token}` } }).then((r) => r.text());
-	await showCard(`<h2>Before (saved when the scraper was built) and after (now), drawn from the page's code</h2><div class="grid" style="grid-template-columns:1fr 1fr"><div class="box" style="padding:8px;height:520px;overflow:hidden;background:#fff">${before}</div><div class="box" style="padding:8px;height:520px;overflow:hidden;background:#fff">${after}</div></div>`);
+	await showCard(`<h2>Page drawings: the saved build layout and the current layout</h2><div class="grid" style="grid-template-columns:1fr 1fr"><div class="box" style="padding:8px;height:520px;overflow:hidden;background:#fff">${before}</div><div class="box" style="padding:8px;height:520px;overflow:hidden;background:#fff">${after}</div></div>`);
 });
 await scene("abort", async () => {
 	await abortWatcher;
-	await showCard(`<h1>Step 3: stop the run</h1><p>Apify console > repair run ${repair1!.id} > <b>Abort</b></p><p id="st" style="color:#ff7b72">status: stopping…</p>`);
+	await showCard(`<h1>Step 3: stop the run</h1><p>To stop repair run ${repair1!.id}, click <b>Abort</b> in Apify Console.</p><p id="st" style="color:#ff7b72">status: stopping…</p>`);
 	await until("ABORTED", 120_000, async () => (await runStatus(repair1!.id)) === "ABORTED");
 	await page.evaluate(() => {
 		const el = document.getElementById("st");
-		if (el) el.textContent = "status: ABORTED. The computer that ran the agent is gone.";
+		if (el) el.textContent = "status: ABORTED. The agent's computer stops.";
 	});
 	const text = await runLog(repair1!.id);
 	await sleep(1500);
@@ -251,7 +251,7 @@ await scene("memory", async () => {
 	const newest = logs[logs.length - 1]!;
 	const rec = await client.keyValueStore(MEMORY_STORE).getRecord(newest.key);
 	const json = JSON.stringify(rec?.value, null, 1).slice(0, 1400);
-	await showCard(`<h2>The agent's memory: key-value store shd-agent-memory-ctzTh4lGVmdeKVFDl  [Apify console > Storage]</h2><div class="grid" style="grid-template-columns:1.1fr 1fr"><div class="box"><table><tr><th>records</th><th>count</th><th>what</th></tr><tr><td>log-000000001 … ${esc(newest.key)}</td><td>${logs.length}</td><td>one record per step</td></tr><tr><td>snapshot-…</td><td>${snaps.length}</td><td>summary every 25 steps</td></tr>${others.map((k) => `<tr><td>${esc(k.key)}</td><td>${k.size} B</td><td>${k.key.startsWith("fixture") ? "saved when the scraper was built" : k.key.startsWith("incident") ? "the case file" : k.key.startsWith("repair-conversation") ? "which conversation handles which case" : ""}</td></tr>`).join("")}</table></div><div class="box"><h3>${esc(newest.key)} (newest step)</h3><div class="json">${esc(json)}</div></div></div>`);
+	await showCard(`<h2>The agent's memory: key-value store shd-agent-memory-ctzTh4lGVmdeKVFDl  [Apify Console > Storage]</h2><div class="grid" style="grid-template-columns:1.1fr 1fr"><div class="box"><table><tr><th>records</th><th>count</th><th>what</th></tr><tr><td>log-000000001 … ${esc(newest.key)}</td><td>${logs.length}</td><td>one record per saved step</td></tr><tr><td>snapshot-…</td><td>${snaps.length}</td><td>all saved steps, combined every 25 steps</td></tr>${others.map((k) => `<tr><td>${esc(k.key)}</td><td>${k.size} B</td><td>${k.key.startsWith("fixture") ? "build references" : k.key.startsWith("incident") ? "the incident" : k.key.startsWith("repair-conversation") ? "which conversation handles which failure" : ""}</td></tr>`).join("")}</table></div><div class="box"><h3>${esc(newest.key)} (newest step)</h3><div class="json">${esc(json)}</div></div></div>`);
 });
 let repair2 = "";
 let steerUrl = "";
@@ -259,14 +259,14 @@ await scene("resume", async () => {
 	const input = (await client.keyValueStore((await client.run(repair1!.id).get())!.defaultKeyValueStoreId).getRecord("INPUT"))?.value as object;
 	const r = await client.actor(REPAIR).start(input);
 	repair2 = r.id;
-	await liveLog(repair2, `Repair run ${repair2}, started again with the same input  [Apify console > Actor > Start]`, (t) => t.includes("waiting for the agent to finish"), 120_000, 30);
+	await liveLog(repair2, `Repair run ${repair2}, started again with the same input  [Apify Console > Actor > Start]`, (t) => t.includes("waiting for the agent to finish"), 120_000, 30);
 	steerUrl = (await client.run(repair2).get())!.containerUrl ?? "";
 	await sleep(3000);
 });
 await scene("steer-first", async () => {
-	await until("steer page", 90_000, async () => (await fetch(steerUrl).then((r) => r.status).catch(() => 0)) === 200);
+	await until("agent web page", 90_000, async () => (await fetch(steerUrl).then((r) => r.status).catch(() => 0)) === 200);
 	await page.goto(steerUrl, { waitUntil: "load" });
-	await until("first assistant message on the steer page", 120_000, async () => {
+	await until("first agent message on the agent web page", 120_000, async () => {
 		const n = await page.locator(".ev.assistant").count();
 		return n > 0;
 	}, 2000);
@@ -287,7 +287,7 @@ await scene("steer-first", async () => {
 	});
 });
 await scene("steer", async () => {
-	await until("steer page", 90_000, async () => (await fetch(steerUrl).then((r) => r.status).catch(() => 0)) === 200);
+	await until("agent web page", 90_000, async () => (await fetch(steerUrl).then((r) => r.status).catch(() => 0)) === 200);
 	await page.goto(`${STABLE}?token=${token}`, { waitUntil: "load" }).catch(() => page.goto(steerUrl, { waitUntil: "load" }));
 	if (!page.url().startsWith(steerUrl)) await page.goto(steerUrl, { waitUntil: "load" });
 	await sleep(2000);
@@ -320,7 +320,7 @@ await scene("report", async () => {
 	await until("run finished", 300_000, async () => ["SUCCEEDED", "FAILED"].includes(await runStatus(repair2)));
 	const d = (await client.run(repair2).get())!;
 	const report = (await client.dataset(d.defaultDatasetId).listItems()).items[0];
-	await showCard(`<h2>The report, stored in the run's dataset  [Apify console > Runs > Dataset]</h2><div class="json">${esc(JSON.stringify(report, null, 2)).slice(0, 2600)}</div>`);
+	await showCard(`<h2>The report, stored in the run's dataset  [Apify Console > Runs > Dataset]</h2><div class="json">${esc(JSON.stringify(report, null, 2)).slice(0, 2600)}</div>`);
 });
 await scene("green", async () => {
 	const g = await client.actor(SCRAPER).start({}, { build: "prod" });
@@ -330,16 +330,16 @@ await scene("green", async () => {
 	await show(termPage(`Scraper run ${g.id} (build prod → ${d.buildNumber}): status ${d.status}`, [...cleanLog(await runLog(g.id)), "", "first items of the dataset:", ...items.map((i) => JSON.stringify(i))], current!.caption));
 });
 await scene("close", async () =>
-	showCard(`<h1>What you saw</h1><p>The website changed. The scraper failed and started the repair agent. Plain code listed what changed. The agent remembered why it built the scraper the way it did. It was stopped and restarted without losing anything. Someone sent it a message mid-work. It fixed and tested the code, a person approved, and the next scraper run worked.</p><p style="color:#9ecbff">Simplified: the before and after pictures are drawn from the page's code, and the website is ours. Everything else is real and ran unattended on Apify while this was recorded.</p><p class="dim" style="font-size:18px;color:#8b949e">Runs: red ${redId}, repair ${repair1?.id} → ${repair2}. Memory store ${MEMORY_STORE}.</p>`),
+	showCard(`<h1>The repair process</h1><p>The website changes. The scraper fails and starts the repair agent. Plain code lists the changes. Saved build notes guide the investigation. A restart keeps the saved work. A message reaches the agent while it works. The agent fixes and tests the code. A person approves before the next scraper run succeeds.</p><p style="color:#9ecbff">Simplified: the website is ours, and the page pictures are drawings. The recorder automates the presentation actions and displays live platform data.</p><p class="dim" style="font-size:18px;color:#8b949e">Runs: failed ${redId}, repair ${repair1?.id} → ${repair2}. Memory store ${MEMORY_STORE}.</p>`),
 );
 await sleep(1500);
 const videoPath = await page.video()!.path();
 await ctx.close();
 await browser.close();
-log(`recorded ${videoPath}; muxing`);
+log(`recorded ${videoPath}. Combining video and narration`);
 await writeFile(join(WORK, "marks.json"), JSON.stringify(marks, null, 1));
 
-// ---------------------------------------------------------------- mux ---------------------------------------
+// Combine video and narration.
 const inputs: string[] = ["-i", videoPath];
 const filters: string[] = [];
 const labels: string[] = [];

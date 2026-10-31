@@ -1,6 +1,6 @@
-// A deterministic "screenshot" without a browser: parse the page, draw the product grid as the scraper would
-// see it, and overlay anything fixed-positioned (the cookie banner). Good enough to show, side by side, that
-// prices disappeared and a banner appeared. Chromium is out of scope for the demo.
+// Draw a page picture from its HTML without opening a browser. The same HTML gives the same picture.
+// Draw the product grid and the cookie banner so you can compare the old and new pages side by side.
+// Chromium, a web browser, is outside the scope of these pictures.
 import * as cheerio from "cheerio";
 
 const esc = (s: string): string => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -57,7 +57,7 @@ ${bannerSvg}
 </svg>`;
 }
 
-/** Facts about the page the diff bundle compares: selector matches, scripts, suspicious class names. */
+/** The page comparison uses these facts: matching page elements, scripts, and suspicious class names. */
 export function pageFacts(html: string, selectors: Record<string, string>) {
 	const $ = cheerio.load(html);
 	const selectorMatches: Record<string, number> = {};

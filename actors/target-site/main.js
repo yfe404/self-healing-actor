@@ -1,7 +1,7 @@
-// The target site: a Standby Actor serving one product page. On every request it reads the record `variant`
-// from its named KV store and serves markup variant `a` (original) or `b` (the redesign that breaks the
-// scraper: price class renamed and nested, a cookie banner overlaying the list, a new consent script). The item
-// markup itself (`li.product`, `.name`, `.rating`) stays, so only the price field goes missing.
+// The target site uses Apify's Standby mode to serve a product page when an HTTP request arrives.
+// Each request reads `variant` from the site's named key-value store. Layout `a` is the original.
+// Layout `b` renames and splits the price element, adds a cookie banner over the list, and adds a consent script.
+// The product elements keep `li.product`, `.name`, and `.rating`, so only the price field goes missing.
 import http from "node:http";
 import { Actor } from "apify";
 
@@ -80,4 +80,4 @@ const server = http.createServer(async (req, res) => {
 	res.end(page(variant));
 });
 
-server.listen(Actor.config.get("containerPort") || 4321, () => console.log(`target site listening; state store ${STATE_STORE}`));
+server.listen(Actor.config.get("containerPort") || 4321, () => console.log(`target site listening. State store ${STATE_STORE}`));

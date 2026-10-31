@@ -1,15 +1,16 @@
-// Pi Durable storage on an Apify key-value store, as a commit log.
+// Pi Durable, the agent framework, saves each step in an Apify key-value store.
+// A commit saves one batch of changes as a single record, either fully present or absent.
+// `seq` is the saved step's sequence number. Leading zeros keep record keys in sequence order.
 //
 // Layout of the store:
-//   log-000000123        one record per committed batch: { seq, writes }. Written with a single PUT, so a
-//                        commit is either fully present or absent. The zero-padded seq makes keys sort.
-//   snapshot-000000100   every `snapshotEvery` commits: { seq, commits: [{ seq, writes }, ...] } holding every
-//                        commit up to seq, so startup reads one record plus the log tail instead of N records.
-//   head                 { seq } optimisation only; startup derives the true head by listing `log-`.
+//   log-000000123        one saved step: { seq, writes }, stored with a single PUT request
+//   snapshot-000000100   all saved steps up to seq: { seq, commits: [{ seq, writes }, ...] }
+//                        written every `snapshotEvery` steps so startup reads one record plus later steps
+//   head                 { seq } startup finds the latest step by listing `log-`, rather than trusting this record
 //
-// The working set is a MemoryStorage (the package's reference backend). Every read is answered from memory;
-// the KV store is a write-ahead log, read only at startup. A commit is not done until its PUT returned.
-// This mirrors the package's own JSONL backend, which is MemoryStorage plus an append-only file.
+// MemoryStorage, the package's reference implementation, answers reads from memory.
+// The key-value store records each step before memory changes. Startup reads those records to restore memory.
+// A step is saved only when the PUT request returns. The package's file storage uses the same order.
 import type { Context } from "@earendil-works/chord";
 import { MemoryStorage } from "@earendil-works/pi-durable";
 import type {
@@ -45,9 +46,9 @@ const snapshotKey = (seq: number): string => `${SNAPSHOT_PREFIX}${String(seq).pa
 const seqOfKey = (key: string, prefix: string): number => Number(key.slice(prefix.length));
 
 export type ApifyKvStorageOptions = {
-	/** Write a snapshot record every this many commits. Default 25. */
+	/** Save a combined record of all steps after this many new steps. Default 25. */
 	readonly snapshotEvery?: number;
-	/** Where startup and commit diagnostics go. Default: silent. */
+	/** Where to send messages about startup and saved steps. Default: silent. */
 	readonly log?: (line: string) => void;
 };
 
@@ -74,7 +75,7 @@ export class ApifyKvStorage implements Storage {
 		this.log = options.log ?? (() => {});
 	}
 
-	/** Open the store: load the newest snapshot, then replay every `log/` record after it, in seq order. */
+	/** Restore memory from the newest combined record, then apply later `log-` records in sequence order. */
 	static async open(kv: KvClient, options: ApifyKvStorageOptions = {}): Promise<ApifyKvStorage> {
 		const storage = new ApifyKvStorage(kv, options);
 		await storage.recover();
@@ -92,7 +93,7 @@ export class ApifyKvStorage implements Storage {
 				snapshotSeq = snapshot.seq;
 			}
 		}
-		// The true head comes from the listing, never from the `head` record.
+		// Find the latest saved step from the listed keys. Do not trust the `head` record.
 		const logKeys = await this.kv.listKeys(LOG_PREFIX);
 		let replayed = 0;
 		for (const key of logKeys) {
@@ -124,20 +125,20 @@ export class ApifyKvStorage implements Storage {
 
 	async commit(writes: readonly StorageWrite[], _context: Context): Promise<Seq> {
 		this.assertUsable();
-		// Validation and detaching happen in memory first; a refused batch changes nothing and never reaches the store.
+		// Validate the changes and copy them in memory first. Reject invalid changes before writing to the store.
 		const prepared = this.memory.prepareCommit(writes);
 		const record: StoredCommit = { seq: prepared.seq, writes: prepared.writes };
 		try {
 			await this.kv.put(logKey(prepared.seq), record);
 		} catch (error) {
-			// Nothing was applied in memory, so the storage is still consistent; the Session treats this as fatal anyway.
+			// Memory has not changed. Fail the current session so the next run reopens the saved records.
 			this.poisoned = error instanceof Error ? error : new Error(String(error));
 			throw this.poisoned;
 		}
 		const seq = prepared.apply();
 		this.commits.push(record);
 		if (seq % this.snapshotEvery === 0) {
-			// Best effort: a lost snapshot only costs startup time, the log stays authoritative.
+			// If this combined record fails to save, startup can still read each saved step.
 			try {
 				await this.kv.put(snapshotKey(seq), { seq, commits: this.commits } satisfies SnapshotRecord);
 				await this.kv.put(HEAD_KEY, { seq });

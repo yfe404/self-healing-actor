@@ -1,5 +1,5 @@
-// Prints the durable task tree with the status of every task. This is what the audience sees on a resumed
-// run: finished tool calls stay finished, the interrupted one shows as interrupted, the rest continues.
+// Print each unit of work and its saved status, grouped under the work that started it.
+// On restart, you can see completed and interrupted tool calls before the agent continues.
 import type { Context } from "@earendil-works/chord";
 import type { Harness, HarnessInspection, Storage, TaskInspection } from "@earendil-works/pi-durable";
 
@@ -7,12 +7,12 @@ type Rec = {
 	id: unknown;
 	kind?: string;
 	conversationId?: unknown;
-	owner?: unknown; // the owning task's id, absent for top-level work
+	owner?: unknown; // ID of the work that started this unit, absent for top-level work
 	input?: { kind?: string; assistant?: unknown; callId?: string } | undefined;
 	state?: { status?: string; checkpoint?: { phase?: string } } | undefined;
 };
 
-/** A tool task's input names the assistant entry and call id; the tool name lives in that entry. */
+/** Look up the tool name in the assistant message identified by the tool call's input. */
 async function toolName(storage: Storage, record: Rec, context: Context): Promise<string | undefined> {
 	if (record.kind !== "pi.tool" || record.input?.assistant === undefined || record.conversationId === undefined) return undefined;
 	try {
@@ -31,7 +31,7 @@ export async function formatTaskTree(inspection: HarnessInspection, storage: Sto
 	for (const task of inspection.tasks) {
 		const owner = (task.record as Rec).owner;
 		const live = new Set(inspection.tasks.map((t) => String((t.record as Rec).id)));
-		// A task whose owner is no longer live (already settled) is shown at the top level.
+		// Show work at the top level if the work that started it has already finished.
 		const key = owner === undefined || owner === null || !live.has(String(owner)) ? "root" : String(owner);
 		byOwner.set(key, [...(byOwner.get(key) ?? []), task]);
 	}

@@ -1,7 +1,9 @@
-// Deploys the three single-file Actors (target site, scraper, redirector) as SOURCE_FILES Actors through the
-// API, wires the failed-run webhook to the repair Actor, seeds the target site's variant, and sets the repair
-// Actor's secret env vars. The repair Actor itself is pushed with `apify push` from repair-actor/.
+// Upload the target site, scraper, and permanent-link server through the Apify API as source files.
+// A webhook, an HTTP notification, starts the repair Actor when the scraper fails.
+// The site command creates the initial layout setting. The repair-env command sets the secret model key.
+// Push the repair Actor with `apify push` from repair-actor/ before you configure it here.
 // Usage: npx tsx scripts/deploy.ts [site|scraper|redirector|webhook|repair-env|all]
+// The all command excludes repair-env. Standby mode serves incoming web requests without a manual start.
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { ApifyClient } from "apify-client";
@@ -65,12 +67,12 @@ async function ensureActor(spec: Spec): Promise<string> {
 	if (build.status !== "SUCCEEDED") throw new Error(`build of ${ref} ended ${build.status}`);
 	if (spec.tagProd) {
 		const prod = await client.actor(ref).build(CONFIG.scraperVersion, { tag: CONFIG.buildTag, waitForFinish: 300 });
-		console.log(`tagged ${CONFIG.buildTag}: build ${prod.id} ${prod.status}`);
+		console.log(`build label ${CONFIG.buildTag}: build ${prod.id} ${prod.status}`);
 	}
 	if (spec.standby) {
 		const fresh = (await client.actor(ref).get()) as { standbyUrl?: string } | undefined;
 		const expected = standbyUrl(spec.name === CONFIG.actors.targetSite ? "targetSite" : "redirector").replace(/\/$/, "");
-		console.log(`standby URL: ${fresh?.standbyUrl}`);
+		console.log(`web address served on request: ${fresh?.standbyUrl}`);
 		if (fresh?.standbyUrl !== expected) throw new Error(`config.ts standbyUrl() gives ${expected} but the platform says ${fresh?.standbyUrl}; fix STANDBY_USER in config.ts`);
 	}
 	return actor.id;
@@ -130,10 +132,10 @@ async function webhook(): Promise<void> {
 	const mine = existing.items.find((w) => w.requestUrl === requestUrl);
 	if (mine) {
 		await client.webhook(mine.id).update({ eventTypes: ["ACTOR.RUN.FAILED"], payloadTemplate });
-		console.log(`webhook ${mine.id} updated`);
+		console.log(`failed-run notification ${mine.id} updated`);
 	} else {
 		const created = await client.webhooks().create({ eventTypes: ["ACTOR.RUN.FAILED"], condition: { actorId: scraper.id }, requestUrl, payloadTemplate, description: "SHD: failed scraper run starts the repair agent" });
-		console.log(`webhook ${created.id} created: scraper FAILED -> ${actorRef("repair")}`);
+		console.log(`failed-run notification ${created.id} created: scraper FAILED -> ${actorRef("repair")}`);
 	}
 }
 
@@ -146,7 +148,7 @@ async function repairEnv(): Promise<void> {
 	await client.actor(repair.id).version(versionNumber).update({ envVars: [{ name: "OPENROUTER_API_KEY", value: key, isSecret: true }] } as never);
 	await client.actor(repair.id).update({ actorPermissionLevel: "FULL_PERMISSIONS" } as never);
 	console.log(`repair actor ${repair.id} version ${versionNumber}: OPENROUTER_API_KEY set (secret), FULL_PERMISSIONS`);
-	// Env vars are baked into a build, so a build made before the secret was set runs without it.
+	// Builds include their environment variables. Rebuild after setting the secret so the run can use it.
 	const build = await client.actor(repair.id).build(versionNumber, { tag: "latest", waitForFinish: 600 });
 	console.log(`rebuilt with the secret: build ${build.id} ${build.status} ${build.buildNumber ?? ""}`);
 	if (build.status !== "SUCCEEDED") throw new Error(`repair actor build ended ${build.status}`);

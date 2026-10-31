@@ -1,4 +1,4 @@
-// The diff bundle: plain code, no model. Computed before the agent wakes, so its first job is interpretation.
+// Plain code computes the page comparison before the agent starts. The agent then interprets the changes.
 import { FIXTURE, type FixtureStore } from "./fixtures.js";
 import { pageFacts, renderPageSvg, SUSPICIOUS } from "./render-svg.js";
 import { fetchTargetPage, readRun, type RunStats } from "./scraper-platform.js";
@@ -77,7 +77,7 @@ export function summarize(b: DiffBundle): string[] {
 	return lines;
 }
 
-/** What the model reads as the incident. Facts only; no interpretation. */
+/** The model reads this failure record. It contains facts without interpretation. */
 export function incidentText(b: DiffBundle): string {
 	return [
 		`INCIDENT (computed by the platform, not by a model) for scraper run ${b.failedRunId}.`,

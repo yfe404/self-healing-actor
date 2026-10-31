@@ -1,5 +1,6 @@
-// The patient: a Cheerio scraper of the target site. Items go to the default dataset, then the run validates
-// its own output: a price fill rate under the threshold writes a DIAGNOSIS record and fails the run.
+// Cheerio, an HTML-reading library, extracts products from the target site into the run's dataset.
+// The scraper then checks the share of products with a price. If that share falls below the threshold,
+// the scraper writes a DIAGNOSIS record and fails the run.
 import { Actor } from "apify";
 import * as cheerio from "cheerio";
 import { SELECTORS, extract } from "./selectors.js";
@@ -23,7 +24,7 @@ await Actor.pushData(items);
 const fill = (field) => (items.length === 0 ? 0 : items.filter((i) => i[field] !== null && i[field] !== undefined && i[field] !== "").length / items.length);
 const fillRates = { name: fill("name"), price: fill("price"), rating: fill("rating") };
 const summary = { url, itemCount: items.length, fillRates, selectors: SELECTORS, threshold };
-console.log(`scraped ${items.length} items; fill rates ${JSON.stringify(fillRates)}`);
+console.log(`scraped ${items.length} items. Share of items with each field ${JSON.stringify(fillRates)}`);
 
 if (items.length === 0 || fillRates.price < threshold) {
 	const diagnosis = {

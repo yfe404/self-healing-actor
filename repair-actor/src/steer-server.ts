@@ -1,5 +1,6 @@
-// The steer-and-watch page: one HTML page, a server-sent event stream of the conversation, a steer box, and
-// an Approve button. Served on the run's container port, so it also appears in Console under "Live view".
+// The agent web page shows the conversation, accepts messages, and has an Approve button.
+// A server-sent event stream sends updates to the browser over one open connection.
+// The run serves the page on its web port, so you can also open it in Console under "Live view".
 import http from "node:http";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { Harness } from "@earendil-works/pi-durable";
@@ -15,7 +16,7 @@ export type SteerServerOptions = {
 	storage: Storage;
 	port: number;
 	log: (line: string) => void;
-	/** Resolved once the repair conversation exists (it is created after the diff bundle). */
+	/** Return the repair conversation once the page comparison finishes and creates it. */
 	conversation: () => Promise<{ id: unknown; submit: (draft: never, ctx: never) => Promise<unknown> } | undefined>;
 	header: () => string;
 };
@@ -34,7 +35,7 @@ function add(cls,text){const d=document.createElement('div');d.className='ev '+c
 let live={};
 function render(ev){
  if(ev.type==='header'){head.textContent=ev.text;return}
- if(ev.type==='snapshot'){log.innerHTML='';add('sys','— current state (you joined mid-run; everything below was already committed) —');for(const e of ev.entries){try{renderEntry(e)}catch(err){add('sys','could not render entry: '+err)}}add('sys','— live from here —');return}
+ if(ev.type==='snapshot'){log.innerHTML='';add('sys','Saved entries before you join this run');for(const e of ev.entries){try{renderEntry(e)}catch(err){add('sys','could not render entry: '+err)}}add('sys','Live updates from here');return}
  if(ev.type==='entry_appended'||ev.type==='message_end'||ev.type==='tool_execution_end'){renderEntry(ev.entry);return}
  if(ev.type==='message_update'){const t=(ev.changes||[]).filter(c=>c.type==='text_delta').map(c=>c.delta).join('');if(!t)return;if(!live.msg)live.msg=add('assistant','');live.msg.textContent+=t;return}
  if(ev.type==='tool_execution_start'){live.msg=null;add('sys','tool call → '+ev.toolName+' '+JSON.stringify(ev.args).slice(0,300));return}
@@ -50,15 +51,15 @@ function renderEntry(e){
  const data=e.data||{};
  if(k==='apify.incident'){add('incident',data.summary||txt||'incident');return}
  if(k==='apify.steer'){add('steer','STEER: '+(data.content||txt));return}
- if(k==='pi.user'){const handoff=/HANDOFF/i.test(txt)||!!data.handoff;add(handoff?'sys':'steer',(handoff?'handoff note from the build session: ':'you: ')+txt.slice(0,1500));return}
+ if(k==='pi.user'){const handoff=/HANDOFF/i.test(txt)||!!data.handoff;add(handoff?'sys':'steer',(handoff?'saved build notes: ':'you: ')+txt.slice(0,1500));return}
  if(k==='pi.assistant'){if(txt)add('assistant',txt);for(const p of parts.filter(p=>p.type==='toolCall'))add('sys','tool call → '+p.name+' '+JSON.stringify(p.arguments||{}).slice(0,300));return}
  if(k==='pi.tool-result'||k==='pi.tool_result'){const m=msgs.find(m=>m.toolName)||{};add('tool',(m.toolName||data.toolName||'result')+': '+(txt||JSON.stringify(data).slice(0,600)).slice(0,1200));return}
  if(k==='pi.system'||k==='pi.usage'||k==='pi.provider'||k==='pi.head')return;
  add('sys',k+' '+(txt||JSON.stringify(data)).slice(0,300));
 }
-function connect(){const es=new EventSource('/events');es.onmessage=m=>{try{render(JSON.parse(m.data))}catch(err){add('sys','bad event '+err+' '+m.data.slice(0,200))}};es.onerror=()=>{add('sys','stream closed; reconnecting in 3s');es.close();setTimeout(connect,3000)}}
+function connect(){const es=new EventSource('/events');es.onmessage=m=>{try{render(JSON.parse(m.data))}catch(err){add('sys','bad event '+err+' '+m.data.slice(0,200))}};es.onerror=()=>{add('sys','Live updates stopped. Reconnecting in 3 seconds');es.close();setTimeout(connect,3000)}}
 connect();
-document.getElementById('f').onsubmit=async e=>{e.preventDefault();const t=document.getElementById('t');const text=t.value.trim();if(!text)return;t.value='';const r=await fetch('/steer',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({text})});add('sys','steer sent: '+await r.text())};
+document.getElementById('f').onsubmit=async e=>{e.preventDefault();const t=document.getElementById('t');const text=t.value.trim();if(!text)return;t.value='';const r=await fetch('/steer',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({text})});add('sys','message sent: '+await r.text())};
 document.getElementById('approve').onclick=async()=>{const by=prompt('Your name (recorded in the report):')||'anonymous';const r=await fetch('/approve',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({by})});add('sys','approve: '+await r.text())};
 </script></body></html>`;
 
@@ -147,7 +148,7 @@ export function startSteerServer(opts: SteerServerOptions): http.Server {
 			res.end(String((error as Error).message));
 		}
 	});
-	server.listen(opts.port, () => log(`steer server listening on port ${opts.port}`));
+	server.listen(opts.port, () => log(`agent web page server listening on port ${opts.port}`));
 	return server;
 }
 

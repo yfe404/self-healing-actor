@@ -1,5 +1,5 @@
-// Everything that touches the Apify platform from inside the repair run: the client, the run's own identity,
-// the agent's memory store, the single-owner check, and the two URLs people open.
+// Connect the repair run to Apify, identify the run, and open the agent's memory store.
+// Check that another repair run is not using the same store. Provide the two links you can open.
 import { ApifyClient } from "apify-client";
 import { ApifyKvStorage } from "./kvstore/apify-kv-storage.js";
 import { apifyKvClient, localDirKvClient } from "./kvstore/kv-client.js";
@@ -22,7 +22,7 @@ export const self = {
 
 export const agentStoreName = (scraperActorId: string): string => `${AGENT_STORE_PREFIX}${scraperActorId}`;
 
-/** The agent's memory: a named KV store on the platform, or ./storage/key_value_stores/<name> under `apify run`. */
+/** Open the agent's memory in a named key-value store, or under ./storage/key_value_stores/<name> locally. */
 export async function openAgentStorage(scraperActorId: string, log: (line: string) => void): Promise<{ storage: ApifyKvStorage; storeId: string; storeUrl: string }> {
 	const name = agentStoreName(scraperActorId);
 	if (!self.onPlatform && process.env.APIFY_LOCAL_STORAGE_DIR) {
@@ -35,7 +35,7 @@ export async function openAgentStorage(scraperActorId: string, log: (line: strin
 	return { storage, storeId: id, storeUrl: `https://console.apify.com/storage/key-value-stores/${id}` };
 }
 
-/** Another RUNNING run of this Actor with the same scraper actorId owns the store; this run must exit. */
+/** Find another RUNNING repair run for the same scraper actorId. This run must exit if one exists. */
 export async function otherOwnerRunning(scraperActorId: string): Promise<string | undefined> {
 	if (!self.actorId || !self.runId) return undefined;
 	const runs = await client.actor(self.actorId).runs().list({ status: "RUNNING", limit: 20, desc: true });

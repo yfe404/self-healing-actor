@@ -1,5 +1,5 @@
-// The minimal key-value surface the storage backend needs. Two implementations: the Apify platform
-// (apify-client) and a local directory that mirrors `apify run`'s ./storage layout for tests.
+// Read and write named records for the agent's storage.
+// Use the Apify client on the platform or a local directory with the same file layout for tests.
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { ApifyClient } from "apify-client";
@@ -7,9 +7,9 @@ import type { ApifyClient } from "apify-client";
 export interface KvClient {
 	/** Parsed JSON value of a record, or undefined when the key is absent. */
 	get(key: string): Promise<unknown>;
-	/** Store one JSON record; resolves only once the platform acknowledged it. */
+	/** Store one JSON record. Return only after the platform acknowledges the write. */
 	put(key: string, value: unknown): Promise<void>;
-	/** Every key with this prefix, in lexicographic order. */
+	/** List every key with this prefix, sorted as text. */
 	listKeys(prefix: string): Promise<string[]>;
 }
 
@@ -40,7 +40,7 @@ export function apifyKvClient(client: ApifyClient, storeId: string): KvClient {
 
 /**
  * A directory of `<key>.json` files, the layout `apify run` uses under `./storage/key_value_stores/<name>`.
- * A `/` in a key becomes a subdirectory, as the local emulation does it.
+ * A `/` in a key becomes a subdirectory, as it does in Apify's local storage.
  */
 export function localDirKvClient(directory: string): KvClient {
 	const pathOf = (key: string) => join(directory, `${key}.json`);

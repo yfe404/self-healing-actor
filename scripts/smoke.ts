@@ -1,8 +1,9 @@
-// Drives Beats 1-5 unattended against the live platform and asserts each one.
-// Usage: npx tsx scripts/smoke.ts            (one full pass: reset, beats 1-5, reset)
-//        npx tsx scripts/smoke.ts reset      (only put the site and the scraper back to the original state)
-// Needs APIFY_TOKEN. Nothing here runs the agent locally: every action is an Apify API call, the same ones the
-// Console buttons make, plus two HTTP POSTs to the repair run's public URL (steer, approve).
+// Run Steps 1 to 5 unattended on the live platform and check each result.
+// Usage: npx tsx scripts/smoke.ts            (reset, Steps 1 to 5, reset)
+//        npx tsx scripts/smoke.ts reset      (restore the original site and scraper)
+// APIFY_TOKEN gives this script access to Apify. Every action uses the same API as the Console buttons.
+// A webhook is the platform's HTTP notification that starts the repair run after a failure.
+// POST /steer sends the agent a message. POST /approve saves a person's approval.
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { ApifyClient } from "apify-client";
@@ -12,7 +13,7 @@ const client = new ApifyClient({ token: process.env.APIFY_TOKEN });
 const token = process.env.APIFY_TOKEN ?? "";
 const SCRAPER = actorRef("scraper");
 const REPAIR = actorRef("repair");
-/** The build the build session verified and tagged prod; the reset step points prod back at it. */
+/** The agent's initial verified build. Reset points the production build label `prod` back at it. */
 const ORIGINAL_PROD_BUILD = "x1nrd0s8qY8NVe6aK";
 const STEER_TEXT = "the site also added a cookie banner, handle it";
 
@@ -64,7 +65,7 @@ async function findRepairRun(failedRunId: string, notBefore: number): Promise<{ 
 }
 
 async function readSnapshot(containerUrl: string): Promise<string> {
-	// /events is a server-sent event stream; the first event is the snapshot of everything committed so far.
+	// /events streams updates over one open connection. Its first event contains everything saved so far.
 	const controller = new AbortController();
 	const timer = setTimeout(() => controller.abort(), 8000);
 	try {
@@ -88,8 +89,8 @@ async function readSnapshot(containerUrl: string): Promise<string> {
 async function pass(): Promise<void> {
 	await reset();
 
-	// Beat 1: the site owner ships a redesign; the scheduled run goes red.
-	log("beat 1: flipping the site to variant b");
+	// Step 1: the site owner changes the layout and the scraper run fails.
+	log("step 1: changing the site to layout b");
 	log(`site says ${await site("variant?set=b")}`);
 	const failedAt = Date.now();
 	const red = await client.actor(SCRAPER).call({}, { build: CONFIG.buildTag, waitSecs: 240 });
@@ -97,53 +98,53 @@ async function pass(): Promise<void> {
 	const diagnosis = await client.keyValueStore(red.defaultKeyValueStoreId).getRecord("DIAGNOSIS");
 	assert(diagnosis?.value, "the failed run wrote a DIAGNOSIS record");
 
-	// Beat 2: the webhook starts the repair Actor; the diff bundle and the first message appear.
+	// Step 2: the failure notification starts the repair Actor. The page comparison and first message appear.
 	const repair1 = await until("the webhook to start a repair run", 120_000, () => findRepairRun(red.id, failedAt), 5000);
-	log(`beat 2: repair run ${repair1.id} started by the webhook; steer page ${repair1.containerUrl}`);
-	const bundleLog = await until("the diff bundle in the repair log", 90_000, async () => {
+	log(`step 2: failure notification started repair run ${repair1.id}. Agent web page ${repair1.containerUrl}`);
+	const bundleLog = await until("the page comparison in the repair log", 90_000, async () => {
 		const text = await runLog(repair1.id);
 		return text.includes("=== end of diff bundle ===") ? text : undefined;
 	});
-	assert(/price\s+\.price-tag\s+build time: 20 matches, now: 0\s+-> MISSING/.test(bundleLog), "diff bundle reports .price-tag missing");
-	assert(bundleLog.includes("cookie-banner"), "diff bundle lists the new cookie banner class");
-	assert(bundleLog.includes("waking the agent") || bundleLog.includes("resuming investigation"), "incident submitted to the agent");
-	const firstMessage = await until("the agent's first message on the steer page", 120_000, async () => {
+	assert(/price\s+\.price-tag\s+build time: 20 matches, now: 0\s+-> MISSING/.test(bundleLog), "page comparison reports .price-tag missing");
+	assert(bundleLog.includes("cookie-banner"), "page comparison lists the new cookie banner class");
+	assert(bundleLog.includes("waking the agent") || bundleLog.includes("resuming investigation"), "failure record sent to the agent");
+	const firstMessage = await until("the agent's first message on the agent web page", 120_000, async () => {
 		const snapshot = await readSnapshot(repair1.containerUrl);
 		const after = snapshot.slice(snapshot.indexOf("apify.incident"));
 		return /"role":"assistant","content":\[\{"type":"text","text":"((?:[^"\\]|\\.)*)"/.exec(after)?.[1];
 	}, 3000);
 	log(`agent's first message: ${firstMessage.slice(0, 400)}`);
-	assert(/price-tag/.test(firstMessage) && /amount/.test(firstMessage), "first message references the build-time decision by name (.price-tag chosen, .amount rejected; .amount is not in the diff bundle, so it comes from the handoff note)");
+	assert(/price-tag/.test(firstMessage) && /amount/.test(firstMessage), "first message names the saved build decision: .price-tag chosen, .amount rejected. The saved build notes supply .amount because the page comparison does not include it");
 
-	// Beat 3: a skeptic aborts the run mid-investigation; the presenter restarts it with the same input.
-	// Abort while a tool is in flight: right after the source is written, the build is running.
+	// Step 3: stop the run during the investigation, then restart it with the same input.
+	// Stop while a tool runs: the agent starts the build after writing the source.
 	await until("the agent to write the scraper source (abort point)", 120_000, async () => (await runLog(repair1.id)).includes("scraper source written"), 2000).catch(() => log("agent did not write source within 120s; aborting anyway"));
 	await client.run(repair1.id).abort();
 	await until(`run ${repair1.id} to be ABORTED`, 120_000, async () => (await runStatus(repair1.id)) === "ABORTED");
 	const log1 = await runLog(repair1.id);
-	log(`beat 3: aborted ${repair1.id} after ${(log1.match(/\] status: /g) ?? []).length} status lines; restarting with the same input`);
+	log(`step 3: stopped ${repair1.id} after ${(log1.match(/\] status: /g) ?? []).length} status lines. Restarting with the same input`);
 	const input = (await client.keyValueStore((await client.run(repair1.id).get())!.defaultKeyValueStoreId).getRecord("INPUT"))?.value as object;
 	const repair2 = await client.actor(REPAIR).start(input);
-	const startupLog = await until("the restarted run to print its task tree", 120_000, async () => {
+	const startupLog = await until("the restarted run to print its saved work status", 120_000, async () => {
 		const text = await runLog(repair2.id);
 		return text.includes("waiting for the agent to finish") ? text : undefined;
 	});
-	assert(/memory recovered: snapshot=\d+, log records replayed=\d+, head seq=\d+/.test(startupLog), "restarted run recovered the agent's memory from the KV store");
+	assert(/memory recovered: snapshot=\d+, log records replayed=\d+, head seq=\d+/.test(startupLog), "restarted run recovered the agent's memory from the key-value store");
 	assert(startupLog.includes("resuming investigation in conversation #"), "restarted run reused the same investigation conversation (no second investigation)");
 	const tree = startupLog.split("\n").filter((l) => /task tree|live tasks|pi\.generation|pi\.tool|submission #|abandoning|resuming investigation/.test(l)).map((l) => l.replace(/^.*?\] /, "    "));
-	log(`task tree printed at restart:\n${tree.join("\n")}`);
+	log(`saved work status printed at restart:\n${tree.join("\n")}`);
 	const repair2Detail = await client.run(repair2.id).get();
 	const steerUrl = repair2Detail?.containerUrl ?? "";
-	log(`restarted run ${repair2.id}; new steer page ${steerUrl}`);
+	log(`restarted run ${repair2.id}. New agent web page ${steerUrl}`);
 
-	// Beat 4: steer from the audience.
-	await until("the steer page to answer", 90_000, async () => (await fetch(steerUrl).then((r) => r.status).catch(() => 0)) === 200);
+	// Step 4: send the agent a message from the audience.
+	await until("the agent web page to answer", 90_000, async () => (await fetch(steerUrl).then((r) => r.status).catch(() => 0)) === 200);
 	const steer = await fetch(`${steerUrl}/steer`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text: STEER_TEXT }) });
-	assert(steer.status === 200, `beat 4: steer accepted: ${await steer.text()}`);
+	assert(steer.status === 200, `step 4: message accepted: ${await steer.text()}`);
 
-	// Beat 5: gate and promote.
-	await until("the gate to ask for approval", 600_000, async () => (await runLog(repair2.id)).includes("gate: WAITING FOR APPROVAL"));
-	log("beat 5: gate is waiting; approving as 'smoke'");
+	// Step 5: wait for the approval check, then put the fix live.
+	await until("the approval check to ask for approval", 600_000, async () => (await runLog(repair2.id)).includes("gate: WAITING FOR APPROVAL"));
+	log("step 5: approval check is waiting. Approving as 'smoke'");
 	const approve = await fetch(`${steerUrl}/approve`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ by: "smoke" }) });
 	assert(approve.status === 200, `approval accepted: ${await approve.text()}`);
 	const finalStatus = await until("the repair run to finish", 600_000, async () => {
@@ -152,10 +153,10 @@ async function pass(): Promise<void> {
 	});
 	const log2 = await runLog(repair2.id);
 	assert(finalStatus === "SUCCEEDED", `repair run ${repair2.id} finished with ${finalStatus}`);
-	assert(/PROMOTED: prod -> build (\S+)/.test(log2), "prod tag was promoted");
+	assert(/PROMOTED: prod -> build (\S+)/.test(log2), "production build label now points to the fix");
 	const report = (await client.dataset(repair2Detail!.defaultDatasetId).listItems()).items[0] as Record<string, unknown> | undefined;
 	assert(report?.outcome === "promoted" && report.approvedBy === "smoke", `report in the dataset: outcome=${report?.outcome} approvedBy=${report?.approvedBy} elapsed=${report?.elapsedSeconds}s CU=${report?.computeUnitsThisRun}`);
-	log(`report says the steer was ${/cookie/i.test(JSON.stringify(report)) ? "" : "NOT "}reflected (mentions cookie banner)`);
+	log(`report ${/cookie/i.test(JSON.stringify(report)) ? "mentions" : "does NOT mention"} the cookie banner from the audience message`);
 	const green = await client.actor(SCRAPER).call({}, { build: CONFIG.buildTag, waitSecs: 240 });
 	assert(green.status === "SUCCEEDED", `next scraper run ${green.id} on prod (build ${green.buildNumber}) is green`);
 	log(`PASS in ${((Date.now() - t0) / 1000).toFixed(0)}s: red ${red.id}, repair ${repair1.id} -> ${repair2.id}, green ${green.id}, memory store ${agentStoreName((await client.actor(SCRAPER).get())!.id)}`);
