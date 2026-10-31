@@ -1,0 +1,28 @@
+{
+  "title": "SHD repair agent input",
+  "type": "object",
+  "schemaVersion": 1,
+  "properties": {
+    "actorId": {
+      "title": "Scraper Actor id",
+      "description": "The Actor to repair. Its id names the agent's memory store (shd-agent-memory-<actorId>).",
+      "type": "string",
+      "editor": "textfield"
+    },
+    "failedRunId": {
+      "title": "Failed run id",
+      "description": "The failed scraper run. Also the request id of the investigation, so re-running with the same value resumes it.",
+      "type": "string",
+      "editor": "textfield"
+    },
+    "mode": {
+      "title": "Mode",
+      "description": "`repair` (default) investigates the failed run. `probe` only runs a slow dummy tool to demonstrate abort and resume.",
+      "type": "string",
+      "editor": "select",
+      "enum": ["repair", "probe"],
+      "default": "repair"
+    }
+  },
+  "required": ["actorId", "failedRunId"]
+}

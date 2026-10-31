@@ -1,0 +1,12 @@
+{
+  "actorSpecification": 1,
+  "name": "shd-repair-agent",
+  "title": "SHD repair agent (durable, memory in a KV store)",
+  "version": "0.0",
+  "buildTag": "latest",
+  "input": "./input_schema.json",
+  "dockerfile": "../Dockerfile",
+  "environmentVariables": {
+    "NODE_OPTIONS": "--max-old-space-size=1024"
+  }
+}

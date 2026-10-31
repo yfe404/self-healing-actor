@@ -1,0 +1,11 @@
+{
+  "name": "self-healing-actor-demo",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "deploy": "tsx scripts/deploy.ts",
+    "smoke": "tsx scripts/smoke.ts"
+  },
+  "dependencies": { "apify-client": "2.25.0" },
+  "devDependencies": { "tsx": "4.20.6", "typescript": "5.9.3", "@types/node": "24.10.1" }
+}
