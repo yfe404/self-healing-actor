@@ -2,7 +2,7 @@
 
 This demo repairs an Apify scraper after the website changes its layout. A failed scraper run starts the repair Actor, which runs the AI agent. It uses a language model and tools to inspect the page, change the scraper, and test the fix. Tools are actions supplied by code. A person approves before the fix goes live. The agent saves its work in an Apify key-value store, which holds named records, so it can recover saved work after a restart. You can watch, send a message, and approve through the agent web page that the repair run serves. [Follow the demonstration](DEMO.md).
 
-[Watch the narrated demo video](video/self-healing-actor-demo.mp4). It is a 6 minute recording of one real pass: the failure, the repair, a stop and restart, a message from the audience, the approval, and the working scraper. [How it was recorded](DECISIONS.md#d17-the-demo-video-is-a-recording-of-a-real-pass).
+[Watch the narrated demo video](video/self-healing-actor-demo.mp4). It is a 5 minute recording of one real pass: the failure, the repair, a stop and restart, a message from the audience, the approval, and the working scraper. [How it was recorded](DECISIONS.md#d17-the-demo-video-is-a-recording-of-a-real-pass).
 
 
 ## How it works
@@ -11,9 +11,9 @@ This demo repairs an Apify scraper after the website changes its layout. A faile
 2. **Run the scraper.** It checks whether enough products have prices. The changed page makes this check fail, so the run records a diagnosis and fails. [Scraper checks](actors/scraper/main.js).
 3. **Start the repair automatically.** A webhook, a platform rule that reacts to an event, starts the repair Actor when the scraper fails. It passes the scraper ID and failed run ID. [Webhook setup](scripts/deploy.ts).
 4. **Compare the page and recover the notes.** Plain code compares the current page with the copy saved when the agent first built the scraper. The agent receives this page comparison and its saved build notes, the notes it wrote for itself when it built the scraper. [Page comparison](repair-actor/src/diff-bundle.ts) and [repair startup](repair-actor/src/main.ts).
-5. **Investigate and test.** The agent changes the scraper source, builds a packaged version of it, and runs that build against the live website. You can send a message from the agent web page while it works. If you stop the repair run, restart it with the same input to continue the same investigation. [Tools](repair-actor/src/agent-tools.ts) and [presenter steps](DEMO.md).
+5. **Investigate and test.** The agent changes the scraper source, builds a packaged version of it, and runs that build against the live website. You can send a message from the agent web page while it works. If you stop the repair run, restart it with the same input to continue the same investigation. [Tools](repair-actor/src/agent-tools.ts) and [step-by-step runbook](DEMO.md).
 6. **Approve the fix.** The approval check waits for someone to approve from the agent web page. The `promote` tool then moves `prod`, the label selecting the build for normal scraper runs, to the approved build. The report records the entered name and the result. [Approval and reporting](repair-actor/src/agent-tools.ts).
-7. **Run the scraper again.** The presenter starts a run using `prod` and checks that the prices return. [Final presenter step](DEMO.md).
+7. **Run the scraper again.** The next scraper run uses `prod`, and the prices return.
 
 ## Repository map
 
@@ -31,14 +31,7 @@ This demo repairs an Apify scraper after the website changes its layout. A faile
 - [`README.md`](README.md): this introduction and setup guide.
 - [`repair-actor/`](repair-actor/): the repair agent, its storage implementation, initial memory-creation script, and tests.
 - [`scripts/`](scripts/): deployment, unattended demonstration, platform investigation, and documentation checks.
-- [`self-healing-actor-demo-prompt.md`](self-healing-actor-demo-prompt.md): the original project brief, preserved unchanged.
 - [`video/`](video/): the existing video and the program that records it.
-
-The working directory also has local-only entries outside the published project map. The [ignore rules](.gitignore) exclude evidence and installed software, and the [work log](PROGRESS.md) identifies local evidence paths.
-
-- `.evidence/`: local evidence and publication-task files, excluded from publication.
-- `.git/`: local Git repository data, outside the published project files.
-- `node_modules/`: locally installed software, excluded from publication.
 
 ## Run it yourself
 
@@ -154,7 +147,7 @@ The repository is not an installer. To reproduce the demo elsewhere:
 
 ### What is simplified
 
-- The website belongs to the demo and switches between two controlled layouts. The presenter starts the scraper manually to represent a scheduled run. [Presenter sequence](DEMO.md).
+- The website belongs to the demo and switches between two controlled layouts. In the demo, the scraper is started by hand to stand in for a scheduled run. [Runbook](DEMO.md).
 - The before and after “screenshots” are SVG drawings, pictures generated from the page's code. The repair does not capture them with a browser. The recorder itself uses Chromium. [Screenshot and recording decisions](DECISIONS.md).
 - The video uses generated speech from fixed text. Its title, cast, and closing cards are staged. [Recording decision](DECISIONS.md).
 - The report's elapsed time spans restarts. Its compute-unit total covers only the current run, so it is not the total resource use of the investigation. [Accounting decision](DECISIONS.md).

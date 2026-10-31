@@ -6,7 +6,6 @@ Read it as history. Each entry describes the state when it was written, and late
 
 Related files:
 
-- the original brief: [self-healing-actor-demo-prompt.md](self-healing-actor-demo-prompt.md)
 - research facts: [NOTES-research.md](NOTES-research.md)
 - decisions: [DECISIONS.md](DECISIONS.md)
 
@@ -156,4 +155,6 @@ Paths under `.evidence/` and `video/work/` name local log files on the builder's
 - Unexplained platform activity: between 11:39 and 11:44 UTC a complete pass ran on the platform without the smoke script or the recorder. It built scraper 0.0.24, failed run `EndDXkiKocgeZK1sC`, and the webhook started repair run `DCpCoqaVwAXLmdBZY`, which promoted build 0.0.25. Nothing aborted it and nothing reset the platform afterwards, so the website stayed on layout `b` and `prod` pointed at 0.0.25. The recorder's reset repaired this. The review run reported no platform calls, so a Console run-through is the likely cause.
 - Push 12 uploaded the revised repair Actor source: build 0.0.20, `0GnGkdjAuof3KiOMp`, SUCCEEDED with the secret set. The deployed log wording now matches the repository.
 - Video attempt 8 SUCCEEDED on build 0.0.20 with the revised narration and captions. Local evidence: `.evidence/video-8.log`. The file is 349 seconds and 13.1 MB. The run it recorded was aborted at `Sh1C8bMc3ERBBOUHm` and resumed as `PwMgQ1uCA4ZFkrA8k`. Seven frames were checked: cards, the memory store listing, the restart screen with "some work was cut off by the previous run; resuming it now", and the agent web page proposing build 0.0.26 for approval.
+- Video attempt 9 SUCCEEDED and replaced attempt 8. The narration and cards no longer describe the recording or a presentation; they only tell what happens: the owner changes the page, the scheduled run fails, someone aborts the repair run, a colleague sends a message, Dana approves. Local evidence: `.evidence/video-9.log`. The file is 300 seconds and 12.0 MB. Four frames were checked.
+- The original project brief is no longer tracked. It stays on disk and is ignored by Git.
 - After the recorder's final reset: website layout `a`, `prod` at build `x1nrd0s8qY8NVe6aK` (0.0.7). No smoke pass has run on build 0.0.20; the video pass is the only live evidence for it.

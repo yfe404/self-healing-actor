@@ -6,7 +6,7 @@ Nobody has clicked through this runbook in a browser yet. Its Console steps were
 
 ## The video
 
-A narrated 6 minute video of the whole demo, recorded from a real run, is at [video/self-healing-actor-demo.mp4](video/self-healing-actor-demo.mp4). The [recorder source](video/record.ts) produced it.
+A narrated 5 minute video of the whole demo, recorded from a real run, is at [video/self-healing-actor-demo.mp4](video/self-healing-actor-demo.mp4). The [recorder source](video/record.ts) produced it.
 
 To record it again, run `cd video && npx tsx record.ts`. The recorder needs `APIFY_TOKEN`, which is your Apify API token. A run takes about 7 minutes and resets the platform state afterwards.
 
