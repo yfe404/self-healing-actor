@@ -1,4 +1,5 @@
-// Plain code computes the page comparison before the agent starts. The agent then interprets the changes.
+// Plain code compares the immutable original accepted page with the live page before the agent starts.
+// These references are deliberately not refreshed after repairs. Latest notes describe current production.
 import { FIXTURE, type FixtureStore } from "./fixtures.js";
 import { pageFacts, renderPageSvg, SUSPICIOUS } from "./render-svg.js";
 import { fetchTargetPage, readRun, type RunStats } from "./scraper-platform.js";
@@ -63,7 +64,7 @@ export function summarize(b: DiffBundle): string[] {
 	const lines = [
 		`=== DIFF BUNDLE (deterministic, computed before any model call) for failed run ${b.failedRunId} ===`,
 		`page: ${b.targetUrl} (${b.bytes.before} bytes at build time, ${b.bytes.now} now)`,
-		"selectors from the build-time fixture:",
+		"selectors from the original build-time fixture (not necessarily the latest production layout):",
 		...b.selectorMatches.map((m) => `  ${m.field.padEnd(7)} ${m.selector.padEnd(14)} build time: ${m.atBuildTime} matches, now: ${m.now}  -> ${m.verdict}`),
 		`new script tags: ${b.newScripts.length ? b.newScripts.join(", ") : "none"}`,
 		`new class names: ${b.newClasses.length ? b.newClasses.join(", ") : "none"}${b.suspiciousNewClasses.length ? `  (suspicious: ${b.suspiciousNewClasses.join(", ")})` : ""}`,
@@ -82,7 +83,7 @@ export function incidentText(b: DiffBundle): string {
 	return [
 		`INCIDENT (computed by the platform, not by a model) for scraper run ${b.failedRunId}.`,
 		...summarize(b).slice(1, -1),
-		"The screenshots are SVG renders of the parsed page (before = build-time fixture, after = now).",
+		"The screenshots are SVG renders of the parsed page (before = immutable original build-time fixture, after = now). The original references are not refreshed by repairs; latest notes and source inspection describe the current scraper.",
 		"Before calling any tool: in one paragraph, recall from your handoff note which selector you chose for the affected field and which alternative you rejected and why, then relate that to the changes above.",
 	].join("\n");
 }

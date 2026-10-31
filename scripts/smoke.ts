@@ -8,6 +8,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { ApifyClient } from "apify-client";
 import { actorRef, agentStoreName, CONFIG, targetSiteUrl } from "../config.js";
+import { firstIncidentResponse, latestPriceEvidence, readSnapshotStream, smokeEntryText, type SmokeSnapshot } from "../repair-actor/src/smoke-observation.js";
 
 const client = new ApifyClient({ token: process.env.APIFY_TOKEN });
 const token = process.env.APIFY_TOKEN ?? "";
@@ -64,24 +65,16 @@ async function findRepairRun(failedRunId: string, notBefore: number): Promise<{ 
 	return undefined;
 }
 
-async function readSnapshot(containerUrl: string): Promise<string> {
-	// /events streams updates over one open connection. Its first event contains everything saved so far.
+async function readSnapshot(containerUrl: string): Promise<SmokeSnapshot | undefined> {
 	const controller = new AbortController();
 	const timer = setTimeout(() => controller.abort(), 8000);
 	try {
 		const res = await fetch(`${containerUrl}/events`, { signal: controller.signal });
-		const reader = res.body?.getReader();
-		let text = "";
-		while (reader) {
-			const { value, done } = await reader.read();
-			if (done) break;
-			text += new TextDecoder().decode(value);
-			if (text.includes("\n\n")) break;
-		}
-		return text;
+		return res.body ? await readSnapshotStream(res.body) : undefined;
 	} catch {
-		return "";
+		return undefined;
 	} finally {
+		controller.abort();
 		clearTimeout(timer);
 	}
 }
@@ -103,18 +96,39 @@ async function pass(): Promise<void> {
 	log(`step 2: failure notification started repair run ${repair1.id}. Agent web page ${repair1.containerUrl}`);
 	const bundleLog = await until("the page comparison in the repair log", 90_000, async () => {
 		const text = await runLog(repair1.id);
-		return text.includes("=== end of diff bundle ===") ? text : undefined;
+		return text.includes("=== end of diff bundle ===") && text.includes("waking the agent") ? text : undefined;
 	});
 	assert(/price\s+\.price-tag\s+build time: 20 matches, now: 0\s+-> MISSING/.test(bundleLog), "page comparison reports .price-tag missing");
 	assert(bundleLog.includes("cookie-banner"), "page comparison lists the new cookie banner class");
 	assert(bundleLog.includes("waking the agent") || bundleLog.includes("resuming investigation"), "failure record sent to the agent");
-	const firstMessage = await until("the agent's first message on the agent web page", 120_000, async () => {
+	const scraperId = (await client.actor(SCRAPER).get())!.id;
+	const memory = await client.keyValueStores().getOrCreate(agentStoreName(scraperId));
+	const memoryStore = client.keyValueStore(memory.id);
+	const mapping = (await memoryStore.getRecord(`repair-conversation-${red.id}`))?.value as { conversationId: number; forkedAt: number; parentConversationId: number; parentFailedRunId?: string } | undefined;
+	assert(mapping?.conversationId && mapping.parentConversationId && mapping.forkedAt, "repair mapping records its selected parent and exact fork entry");
+	const latest = (await memoryStore.getRecord("latest-handoff"))?.value as { conversationId: number; entryId: number; failedRunId: string; note: string } | undefined;
+	if (mapping!.parentFailedRunId) {
+		assert(latest && latest.failedRunId === mapping!.parentFailedRunId && latest.conversationId === mapping!.parentConversationId && latest.entryId === mapping!.forkedAt, "selected parent is the latest validated completed repair, at its handoff entry");
+		assert(bundleLog.includes(`forked the latest finished repair conversation #${mapping!.parentConversationId} at entry #${mapping!.forkedAt}`), "startup log confirms the actual selected repair parent and entry");
+	} else {
+		assert(bundleLog.includes(`forked the build conversation #${mapping!.parentConversationId} at entry #${mapping!.forkedAt}`), "without a completed repair, startup forks the build handoff");
+	}
+	const observed = await until("the agent's first message on the agent web page", 120_000, async () => {
 		const snapshot = await readSnapshot(repair1.containerUrl);
-		const after = snapshot.slice(snapshot.indexOf("apify.incident"));
-		return /"role":"assistant","content":\[\{"type":"text","text":"((?:[^"\\]|\\.)*)"/.exec(after)?.[1];
+		const message = snapshot && firstIncidentResponse(snapshot, red.id, mapping!.conversationId);
+		return snapshot && message ? { snapshot, message } : undefined;
 	}, 3000);
+	const firstMessage = observed.message;
 	log(`agent's first message: ${firstMessage.slice(0, 400)}`);
-	assert(/price-tag/.test(firstMessage) && /amount/.test(firstMessage), "first message names the saved build decision: .price-tag chosen, .amount rejected. The saved build notes supply .amount because the page comparison does not include it");
+	if (!mapping!.parentFailedRunId) {
+		assert(/price-tag/.test(firstMessage) && /amount/.test(firstMessage), "first message names the saved build decision: .price-tag chosen, .amount rejected. The saved build notes supply .amount because the page comparison does not include it");
+	} else {
+		assert(firstMessage.includes(mapping!.parentFailedRunId), "first message quotes the latest note's source incident, not only the original build notes");
+		assert(latestPriceEvidence(firstMessage, latest!.note, mapping!.parentFailedRunId), "first message quotes the latest price decision and rejected alternative verbatim, including their reasons");
+		const reset = observed.snapshot.entries.find((entry) => entry.id === mapping!.forkedAt && entry.conversationId === mapping!.parentConversationId && entry.kind === "pi.reset");
+		const note = reset ? smokeEntryText(reset) : undefined;
+		assert(note === latest!.note, "agent web page starts from the exact latest saved note selected in the mapping");
+	}
 
 	// Step 3: stop the run during the investigation, then restart it with the same input.
 	// Stop while a tool runs: the agent starts the build after writing the source.
@@ -130,7 +144,9 @@ async function pass(): Promise<void> {
 		return text.includes("waiting for the agent to finish") ? text : undefined;
 	});
 	assert(/memory recovered: snapshot=\d+, log records replayed=\d+, head seq=\d+/.test(startupLog), "restarted run recovered the agent's memory from the key-value store");
-	assert(startupLog.includes("resuming investigation in conversation #"), "restarted run reused the same investigation conversation (no second investigation)");
+	assert(startupLog.includes(`resuming investigation in conversation #${mapping!.conversationId} (`), "restarted run reused the exact mapped investigation conversation (no second investigation)");
+	const resumedMapping = (await memoryStore.getRecord(`repair-conversation-${red.id}`))?.value;
+	assert(JSON.stringify(resumedMapping) === JSON.stringify(mapping), "same-incident restart left the saved mapping and fork provenance unchanged");
 	const tree = startupLog.split("\n").filter((l) => /task tree|live tasks|pi\.generation|pi\.tool|submission #|abandoning|resuming investigation/.test(l)).map((l) => l.replace(/^.*?\] /, "    "));
 	log(`saved work status printed at restart:\n${tree.join("\n")}`);
 	const repair2Detail = await client.run(repair2.id).get();
@@ -154,6 +170,8 @@ async function pass(): Promise<void> {
 	const log2 = await runLog(repair2.id);
 	assert(finalStatus === "SUCCEEDED", `repair run ${repair2.id} finished with ${finalStatus}`);
 	assert(/PROMOTED: prod -> build (\S+)/.test(log2), "production build label now points to the fix");
+	const completed = (await memoryStore.getRecord("latest-handoff"))?.value as { conversationId: number; failedRunId: string; note: string } | undefined;
+	assert(completed?.failedRunId === red.id && completed.conversationId === mapping!.conversationId && completed.note.includes(`Source incident: ${red.id}`), "completed repair published fresh validated notes for the next smoke pass");
 	const report = (await client.dataset(repair2Detail!.defaultDatasetId).listItems()).items[0] as Record<string, unknown> | undefined;
 	assert(report?.outcome === "promoted" && report.approvedBy === "smoke", `report in the dataset: outcome=${report?.outcome} approvedBy=${report?.approvedBy} elapsed=${report?.elapsedSeconds}s CU=${report?.computeUnitsThisRun}`);
 	log(`report ${/cookie/i.test(JSON.stringify(report)) ? "mentions" : "does NOT mention"} the cookie banner from the message`);

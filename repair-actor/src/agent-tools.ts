@@ -4,9 +4,13 @@
 // The `promote` approval check reads a saved record. After approval, a restarted run proceeds without asking again.
 import type { Context } from "@earendil-works/chord";
 import { Type } from "@earendil-works/pi-ai";
-import { defineDoc, defineExtension, defineTool, hook, section, ToolTask } from "@earendil-works/pi-durable";
+import { defineDoc, defineExtension, defineTool, hook, section, ToolTask, type Conversation, type ConversationId } from "@earendil-works/pi-durable";
 import { Actor } from "apify";
 import { FIXTURE, type FixtureStore } from "./fixtures.js";
+import { repairHandoff } from "./repair-chain.js";
+import { compactionHook, conversationCommit, type Summarize } from "./compaction.js";
+import { recallHistoryTool } from "./history.js";
+import { MODELS } from "./models.js";
 import { client } from "./platform.js";
 import { pageFacts, renderPageSvg } from "./render-svg.js";
 import {
@@ -27,6 +31,8 @@ export type ToolEnv = {
 	targetUrl: string;
 	fixtures: FixtureStore;
 	log: (line: string) => void;
+	/** Lazy full handle lookup, installed by repair startup after Harness.open. Build sessions need no lookup. */
+	getConversation?: (id: ConversationId, context: Context) => Promise<Conversation | undefined>;
 	/** Stops the run at its limit. `toolCallsSoFar` counts tool results saved in the conversation transcript. */
 	budget: { maxToolCalls: number; maxElapsedMs: number; startedAt: number; toolCallsSoFar: (conversationId: unknown) => Promise<number> };
 };
@@ -55,7 +61,7 @@ export const StatusDoc = defineDoc<{ phase: string; note: string; proposedBuildI
 	checkpointWhen: () => true,
 });
 
-export function pageTools(env: ToolEnv) {
+export function pageTools(env: ToolEnv, allowFixtureWrites = true) {
 	const fetchPage = defineTool({
 		name: "fetch_page",
 		description: "Fetch the live target page and return its HTML (first 30000 chars) plus facts: script tags, class names, element ids.",
@@ -84,7 +90,7 @@ export function pageTools(env: ToolEnv) {
 
 	const readFixture = defineTool({
 		name: "read_fixture",
-		description: `Read a build-time fixture from the agent's store. Names: ${Object.values(FIXTURE).join(", ")}.`,
+		description: `Read an immutable original build reference from the agent's store, not the latest production layout. Names: ${Object.values(FIXTURE).join(", ")}.`,
 		parameters: Type.Object({ name: Type.String() }),
 		replay: "safe",
 		execute: async (args) => {
@@ -108,7 +114,7 @@ export function pageTools(env: ToolEnv) {
 		},
 	});
 
-	return [fetchPage, snapshotPage, readFixture, storeFixture];
+	return allowFixtureWrites ? [fetchPage, snapshotPage, readFixture, storeFixture] : [fetchPage, readFixture];
 }
 
 export function scraperTools(env: ToolEnv) {
@@ -169,7 +175,7 @@ export function scraperTools(env: ToolEnv) {
 
 	const compare = defineTool({
 		name: "compare_canary",
-		description: "Compare a canary run's output with the build-time expected sample and invariants: same field names, fill rates above thresholds, item count within range, values of the first items equal where the fixture is still valid. Returns a verdict.",
+		description: "Compare a canary run's output with the immutable original expected sample and invariants: same field names, fill rates above thresholds, item count within range. Sample value differences are diagnostic, not automatic failures, because products may change. Returns a verdict.",
 		parameters: Type.Object({ runId: Type.String() }),
 		replay: "safe",
 		execute: async (args) => {
@@ -232,16 +238,22 @@ export function promotionTools(env: ToolEnv) {
 		},
 	});
 
+	// Intentionally not replay safe: a crash after pushData cannot prove that the dataset append was absent.
 	const writeReport = defineTool({
 		name: "write_report",
-		description: "Write the final repair report to this run's dataset and finish. Call exactly once, at the end (also when giving up).",
+		description: "Write the final repair report and leave fresh notes for the next incident. Call exactly once, alone at the end (also when giving up). The handoff replaces your old notes: include current selectors for each field and why, rejected alternatives and reasons, what the site looked like, this incident's changes, build IDs, the outcome and unresolved work. Distinguish attempted changes from the build actually live. Include two separate lines, 'Price decision: <current selector and reason>' and 'Rejected price alternative: <selector and reason>', so your future self can quote the relevant evidence exactly. Carry forward still-relevant rejected alternatives. Do not append all past notes: older decisions remain in history.",
 		parameters: Type.Object({
 			whatChanged: Type.String(),
 			whatWasDone: Type.String(),
 			outcome: Type.String({ description: "promoted | not promoted | gave up" }),
 			promotedBuildId: Type.Optional(Type.String()),
+			handoffNote: Type.String({ minLength: 1, maxLength: 16000, description: "Fresh notes: current selectors and evidence, rejected alternatives and reasons, site layout and changes, build IDs, outcome and unresolved work. Include separate plain-text lines starting exactly 'Price decision:' and 'Rejected price alternative:', each with its selector and reason." }),
 		}),
 		execute: async (args, api, context) => {
+			if (!args.handoffNote.trim()) return { isError: true, output: text("handoffNote must contain fresh notes for the next investigation") };
+			if (!/^Price decision:[ \t]*\S.+$/im.test(args.handoffNote) || !/^Rejected price alternative:[ \t]*\S.+$/im.test(args.handoffNote)) {
+				return { isError: true, output: text("Before writing the report, include two separate plain-text lines in handoffNote: 'Price decision: <current selector and reason>' and 'Rejected price alternative: <selector and reason>'. Keep the other required incident, build and unresolved-work notes too.") };
+			}
 			const approval = await api.snapshot(ApprovalDoc, api.conversationId, context);
 			// Elapsed time starts when the page comparison records the failure. It includes earlier repair runs.
 			const incident = (await env.fixtures.get(`incident-${env.failedRunId}`))?.value as { computedAt?: string } | undefined;
@@ -260,7 +272,9 @@ export function promotionTools(env: ToolEnv) {
 			await Actor.pushData(report);
 			await Actor.setValue("REPORT", report);
 			env.log(`REPORT: ${JSON.stringify(report)}`);
-			return { output: text("report written; you are done"), control: { terminate: true } };
+			const handoff = repairHandoff(env.failedRunId, args.handoffNote);
+			env.log(`handoff prepared (${handoff.length} chars) for incident ${env.failedRunId}; the framework will commit it at the turn boundary`);
+			return { output: text("report written; fresh handoff prepared; you are done"), details: { failedRunId: env.failedRunId, repairHandoff: handoff }, control: { terminate: true, handoff } };
 		},
 	});
 
@@ -344,19 +358,23 @@ export const BuildExtension = (env: ToolEnv) =>
 		tools: [...pageTools(env), ...scraperTools(env), ...buildTools(env)],
 	});
 
-export const RepairExtension = (env: ToolEnv) => {
+export const RepairExtension = (env: ToolEnv, options: { summarize?: Summarize } = {}) => {
 	const promotion = promotionTools(env);
+	const getConversation = (id: ConversationId, context: Context) => {
+		if (!env.getConversation) throw new Error("repair memory conversation lookup is not installed");
+		return env.getConversation(id, context);
+	};
 	return defineExtension({
 		name: "shd-repair",
 		sections: [
 			section(
 				"role",
 				() =>
-					`You are the agent that built scraper Actor ${env.scraperActorId} for ${env.targetUrl}, now handling an incident. The platform has already computed what changed (the incident entry). Your FIRST message, before any tool call, must be one short paragraph that quotes your own handoff note from the build session: for each field the incident flags, the selector you chose then, the alternative you rejected and why (name both classes), and how that relates to what the incident shows. Only then investigate with the tools, change selectors.js, build, run a canary, compare it with the expected sample, set_status with the proposed build id, and call promote (it waits for a human). Finish with write_report. People may steer you mid-run; acknowledge steers in your next message and act on them. Keep messages short and concrete.`,
+					`You are the agent that built scraper Actor ${env.scraperActorId} for ${env.targetUrl}, now handling an incident. The platform has already computed what changed (the incident entry). Your FIRST message, before any tool call, must be one short paragraph that quotes your latest handoff note: name the source incident if the note has one, the current selector it records for each affected field, and a rejected alternative and its reason (name both classes). If the note has 'Price decision:' and 'Rejected price alternative:' lines, quote the contents of BOTH lines verbatim in that paragraph, including their reasons. If the note is the original build handoff, quote the actual chosen selector, rejected alternative, and rejection evidence from that note, not only the incident. Relate those notes to the incident. The incident compares the ORIGINAL accepted layout, so its selectors may differ from your latest notes after prior repairs or a demo reset. If your notes do not explain a selector, search your history with recall_history before guessing. Its search covers the build, previous repairs, and entries hidden by compaction; fetch a matching entry by id for the full evidence. Only then investigate with the tools, change selectors.js, build, run a canary, compare it with the expected sample, set_status with the proposed build id, and call promote (it waits for a human). Finish with write_report and a fresh, self-contained handoffNote covering current selectors and evidence, rejected alternatives and reasons, the site layout, incident changes, build IDs, outcome and unresolved work. People may steer you mid-run; acknowledge steers in your next message and act on them. Keep messages short and concrete.`,
 				{ tag: false },
 			),
 		],
-		tools: [...pageTools(env), ...scraperTools(env), ...promotion.tools],
-		hooks: promotion.hooks,
+		tools: [...pageTools(env, false), ...scraperTools(env), ...promotion.tools, recallHistoryTool(getConversation)],
+		hooks: [...promotion.hooks, compactionHook({ model: MODELS.fix, commit: conversationCommit(getConversation), summarize: options.summarize, log: env.log })],
 	});
 };

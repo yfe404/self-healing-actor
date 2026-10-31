@@ -1,4 +1,5 @@
-// Saved build references use `fixture-*` keys in the agent's key-value store.
+// Immutable original build references use `fixture-*` keys in the agent's key-value store.
+// Only the build extension can write these. Repairs retain independent expectations and the original page.
 // Keep large files, such as page HTML and the drawn page picture, outside the records of saved steps.
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";

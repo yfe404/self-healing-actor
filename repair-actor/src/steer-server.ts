@@ -25,7 +25,7 @@ const PAGE = /* html */ `<!doctype html><html><head><meta charset="utf-8"><title
 <style>body{font-family:system-ui,sans-serif;margin:0;display:grid;grid-template-rows:auto 1fr auto;height:100vh}
 header{padding:10px 16px;background:#111;color:#eee;font-size:14px;white-space:pre-wrap}#log{overflow:auto;padding:12px 16px;font-size:14px;line-height:1.45}
 .ev{margin:4px 0;padding:6px 10px;border-radius:6px;background:#f3f3f3}.assistant{background:#e8f1ff}.tool{background:#fff6dc;font-family:ui-monospace,monospace;white-space:pre-wrap;font-size:12px}
-.incident{background:#ffe3e3;font-family:ui-monospace,monospace;white-space:pre-wrap;font-size:12px}.steer{background:#e5ffe5}.sys{color:#777;font-size:12px}
+.incident{background:#ffe3e3;font-family:ui-monospace,monospace;white-space:pre-wrap;font-size:12px}.steer{background:#e5ffe5;white-space:pre-wrap}.sys{color:#777;font-size:12px}
 form{display:flex;gap:8px;padding:10px 16px;border-top:1px solid #ddd}input{flex:1;padding:8px;font-size:14px}button{padding:8px 14px;font-size:14px}#approve{background:#2a2;color:#fff;border:0}</style></head>
 <body><header id="head">connecting…</header><div id="log"></div>
 <form id="f"><input id="t" placeholder="Steer the agent (e.g. 'the site also added a cookie banner, handle it')" autocomplete="off"><button>Send</button><button type="button" id="approve">Approve promotion</button></form>
@@ -51,7 +51,9 @@ function renderEntry(e){
  const data=e.data||{};
  if(k==='apify.incident'){add('incident',data.summary||txt||'incident');return}
  if(k==='apify.steer'){add('steer','STEER: '+(data.content||txt));return}
- if(k==='pi.user'){const handoff=/HANDOFF/i.test(txt)||!!data.handoff;add(handoff?'sys':'steer',(handoff?'saved build notes: ':'you: ')+txt.slice(0,1500));return}
+ if(k==='pi.reset'){add('steer','LATEST SAVED NOTES (entry #'+e.id+', conversation #'+e.conversationId+'):\\n'+txt);return}
+ if(k==='pi.compaction'){add('sys','History summary: '+txt);return}
+ if(k==='pi.user'){add('steer','you: '+txt);return}
  if(k==='pi.assistant'){if(txt)add('assistant',txt);for(const p of parts.filter(p=>p.type==='toolCall'))add('sys','tool call → '+p.name+' '+JSON.stringify(p.arguments||{}).slice(0,300));return}
  if(k==='pi.tool-result'||k==='pi.tool_result'){const m=msgs.find(m=>m.toolName)||{};add('tool',(m.toolName||data.toolName||'result')+': '+(txt||JSON.stringify(data).slice(0,600)).slice(0,1200));return}
  if(k==='pi.system'||k==='pi.usage'||k==='pi.provider'||k==='pi.head')return;

@@ -10,9 +10,9 @@ This demo repairs an Apify scraper after the website changes its layout. A faile
 1. **Change the website.** The demo hosts its own page of 20 products. Set its `variant` record from `a` to `b` to change the layout and add a cookie banner. [Website code](actors/target-site/main.js).
 2. **Run the scraper.** It checks whether enough products have prices. The changed page makes this check fail, so the run records a diagnosis and fails. [Scraper checks](actors/scraper/main.js).
 3. **Start the repair automatically.** A webhook, a platform rule that reacts to an event, starts the repair Actor when the scraper fails. It passes the scraper ID and failed run ID. [Webhook setup](scripts/deploy.ts).
-4. **Compare the page and recover the notes.** Plain code compares the current page with the copy saved when the agent first built the scraper. The agent receives this page comparison and its saved build notes, the notes it wrote for itself when it built the scraper. [Page comparison](repair-actor/src/diff-bundle.ts) and [repair startup](repair-actor/src/main.ts).
+4. **Compare the page and recover its latest notes.** Plain code compares the current page with the unchanged original build reference. A new incident starts from the latest finished repair's handoff, the note the agent left for its next investigation, or the original build note if no repair has finished. Earlier decisions remain searchable through `recall_history`. [Page comparison](repair-actor/src/diff-bundle.ts), [repair chain](repair-actor/src/repair-chain.ts), and [recall](repair-actor/src/history.ts).
 5. **Investigate and test.** The agent changes the scraper source, builds a packaged version of it, and runs that build against the live website. You can send a message from the agent web page while it works. If you stop the repair run, restart it with the same input to continue the same investigation. [Tools](repair-actor/src/agent-tools.ts) and [walkthrough](WALKTHROUGH.md).
-6. **Approve the fix.** The approval check waits for someone to approve from the agent web page. The `promote` tool then moves `prod`, the label selecting the build for normal scraper runs, to the approved build. The report records the entered name and the result. [Approval and reporting](repair-actor/src/agent-tools.ts).
+6. **Approve the fix.** The approval check waits for someone to approve from the agent web page. The `promote` tool then moves `prod`, the label selecting the build for normal scraper runs, to the approved build. The report records the entered name and the result, and the agent leaves fresh notes for the next repair. [Approval and reporting](repair-actor/src/agent-tools.ts).
 7. **Run the scraper again.** The next scraper run uses `prod`, and the prices return.
 
 ## Repository map
@@ -67,7 +67,7 @@ These commands touch nothing on the platform. Together they take about two minut
    node scripts/check-docs.mjs
    ```
 
-3. Compile the repair Actor and run its storage tests. The tests use the conformance suite that ships with Pi Durable. Setting `KV_CONFORMANCE_PLATFORM=1` adds 25 cases that create and delete real stores, so leave it unset for a local check. See [the test file](repair-actor/test/kv-storage.test.ts).
+3. Compile the repair Actor and run its offline tests for storage, chaining, recall, compaction, and smoke observations. Compaction means summarizing older model input while keeping the original entries stored. Tests use in-memory storage and fake model responses, plus the conformance suite supplied by Pi Durable. Setting `KV_CONFORMANCE_PLATFORM=1` adds 25 cases that create and delete real stores, so leave it unset for a local check. See [the tests](repair-actor/test/).
 
    ```sh
    cd repair-actor && npx tsc -p tsconfig.json && npx tsc -p tsconfig.scripts.json && npx vitest --run && cd ..
@@ -96,7 +96,9 @@ Each pass starts real runs. Measured on this account, one repair run costs betwe
    npx tsx scripts/smoke.ts
    ```
 
-   The unattended check performs Steps 1 to 5, asserts each result, and resets afterwards. Four recorded passes took between 92 and 142 seconds. If an assertion fails, the script stops before its final reset. Run the reset command again.
+   The unattended check performs Steps 1 to 5, asserts each result, and resets afterwards without clearing memory. Four older recorded passes took between 92 and 142 seconds. If an assertion fails, the script stops before its final reset. Run the reset command again.
+
+   To verify chaining after a change, run `npx tsx scripts/smoke.ts` twice in a row. The second pass must select the first pass's completed repair and quote its latest price decision and rejected alternative, including their reasons. Each pass also checks that aborting and restarting reuses the exact same conversation. [What to inspect](WALKTHROUGH.md#the-unattended-check).
 
 3. To record a new video, run the recorder. It resets before and after, takes about 7 minutes, and overwrites `video/self-healing-actor-demo.mp4`.
 
@@ -139,7 +141,9 @@ The repository is not an installer. To reproduce the demo elsewhere:
 ### What is real
 
 - The failed scraper starts a real repair run. The agent edits source, builds and tests the change, waits for approval, and changes the production build label. The unattended script checks this sequence. [Walkthrough](WALKTHROUGH.md).
-- The memory comes from a real build session. The saved notes explain why the agent chose `.price-tag` and rejected `.amount`, which appears on 7 of 20 products as an old price. The script that created it is [build-session.ts](repair-actor/scripts/build-session.ts).
+- The original memory comes from a real build session. Its notes explain why the agent chose `.price-tag` and rejected `.amount`, which appears on 7 of 20 products as an old price. The script that created it is [build-session.ts](repair-actor/scripts/build-session.ts).
+- Chaining is implemented and verified on the platform: finished repairs leave new notes, and later incidents fork from the newest validated handoff. Offline tests cover two repairs and a finished investigation that gave up without changing production; two smoke passes in a row verified it live, see the fragile section for the run IDs. [Chain](repair-actor/src/repair-chain.ts) and [tests](repair-actor/test/repair-integration.test.ts).
+- `recall_history` searches saved decisions across that chain without another model call, including entries hidden from the current model input. Compaction has explicit model-specific settings, preservation instructions, and summarization spend recorded in `pi.usage`, the framework's token and cost totals. [Recall](repair-actor/src/history.ts), [compaction](repair-actor/src/compaction.ts), and [decisions D19 and D20](DECISIONS.md#d19-the-model-sees-bounded-context-while-original-entries-stay-stored).
 - Stop and restart was verified on the platform, including a run aborted 3 seconds after approval that promoted the fix at restart without asking again. The run IDs are in the [walkthrough](WALKTHROUGH.md#step-5-the-agent-fixes-and-tests-the-code-a-person-approves-and-the-fix-goes-live).
 - The unattended check passed four times in a row, three on build 0.0.12 and one on 0.0.14.
 - The video records the real website, run logs, and agent web page. It fetches logs through Apify's API, the interface that programs call to use the platform. [Recording decision](DECISIONS.md).
@@ -150,10 +154,14 @@ The repository is not an installer. To reproduce the demo elsewhere:
 - The before and after “screenshots” are SVG drawings, pictures generated from the page's code. The repair does not capture them with a browser. The recorder itself uses Chromium. [Screenshot and recording decisions](DECISIONS.md).
 - The video uses generated speech from fixed text. Its title, cast, and closing cards are staged. [Recording decision](DECISIONS.md).
 - The report's elapsed time spans restarts. Its compute-unit total covers only the current run, so it is not the total resource use of the investigation. [Accounting decision](DECISIONS.md).
+- Page, selector, and expected-output fixtures remain original build references. A fixture is a saved reference used for comparison. Repairs cannot overwrite them, so candidate output cannot redefine its own expected result. Page comparisons therefore describe changes from the original layout, while latest notes describe later repairs. Sample-value differences are diagnostic; schema, fill-rate, item-count, and run-status checks decide the canary result. [D18](DECISIONS.md#d18-each-repair-starts-from-the-latest-finished-repairs-notes).
 
 ### What is fragile
 
-- The four recorded smoke passes ran on builds 0.0.12 and 0.0.14. Later builds changed the agent web page, the budget counter, and log wording. The video recordings exercised those later builds, but the unattended check has not been repeated on them.
+- Two consecutive repairs were verified on the platform with repair Actor build 0.0.22. The first pass (failed run `eVGacox8jA75YfLZ8`, repair runs `9bSiEaUJAK3aXfMgW` then `xaht4B9yVf7gVs1hp`, 127 seconds) left a handoff at conversation 1066, entry 1129. The second pass (failed run `EKw1hskdNnQWJrVgJ`, repair runs `Kpw5mGkWr2TSICWZ2` then `AQ5Isg6bos7YRRUtK`, 105 seconds) forked from that entry, and its first message quoted the `.value` decision from the first repair, not the original build note. Each repair run cost between 0.01 and 0.03 USD of Apify usage, before model spend.
+- The four older recorded smoke passes ran on builds 0.0.12 and 0.0.14. They and the existing video show a first repair, which starts from the original build note. The video does not show the chain.
+- Compaction requests verbatim preservation, but a model summary can still omit or distort a decision. Copied notes and human messages have a size cap with explicit omission notices. Failed summaries are declined, so the 120,000-token compaction threshold is a target, not an unconditional ceiling. Eligible original decisions remain available through recall. [D19](DECISIONS.md#d19-the-model-sees-bounded-context-while-original-entries-stay-stored).
+- Model input is shortened, but stored history and startup memory continue to grow. Recall scans recovered memory rather than issuing one platform read per entry. It searches the current chain, not abandoned sibling investigations, raw tool results, or individual human-message entries. [D20](DECISIONS.md#d20-recall-searches-the-saved-fork-history-without-another-model-call).
 - Nobody has clicked through the complete walkthrough in a browser yet. Its steps were exercised through the same API calls the Console buttons make. [D16](DECISIONS.md#d16-the-console-steps-were-tested-through-the-api).
 - Anyone with the agent web page link can approve and enter a name. The run's web address needs no token. The handler records the entered name without verifying the person's identity. [Approval step](WALKTHROUGH.md#step-5-the-agent-fixes-and-tests-the-code-a-person-approves-and-the-fix-goes-live), [URL access](DECISIONS.md), and [approval handler](repair-actor/src/steer-server.ts).
 - Stopping a run can interrupt a model request instead of a tool call. The recorded three smoke passes do that. Completed calls stay complete. After restart, tools marked safe to repeat can run again. The code calls this replay safe. Other interrupted tools report interruption to the model. [Restart caveats](WALKTHROUGH.md#step-3-stop-the-repair-run-start-it-again-and-it-picks-up-where-it-left-off) and [replay rules](NOTES-research.md).
@@ -178,29 +186,31 @@ The log and source keep some technical names. Use these explanations when you en
 | Candidate, canary, test run | `candidate` labels a proposed build. A canary is the test run of that build against the live site. [Test tools](repair-actor/src/agent-tools.ts). |
 | Cheerio | The library that reads the website's HTML, the text describing its page structure. [Scraper](actors/scraper/main.js). |
 | Commit, saved step | One all-or-nothing write of agent changes to storage. It is unrelated to a Git commit of source files. [Storage decision](DECISIONS.md). |
+| Compaction, context, token | Context is input sent to the model; a token is a small unit of that input or output. Compaction summarizes older context while keeping its original entries stored. [Policy and limits](DECISIONS.md#d19-the-model-sees-bounded-context-while-original-entries-stay-stored). |
 | Compute unit | Apify's measure of the computing resources a run uses. [Report explanation](WALKTHROUGH.md). |
 | Conformance tests | Tests supplied by Pi Durable that check whether a storage implementation follows its rules. [Test setup](repair-actor/test/kv-storage.test.ts). |
 | Container | The environment in which an Actor run executes. Its web address changes when you start a new repair run. [Restart explanation](WALKTHROUGH.md#step-3-stop-the-repair-run-start-it-again-and-it-picks-up-where-it-left-off). |
-| Conversation, transcript, entry | The conversation is the stored record the model sees. That record is the transcript. Each message or event is an entry. [Package terminology](NOTES-research.md). |
+| Conversation, transcript, entry | The conversation is the stored transcript. The model sees its active part; resets and compaction can hide older entries without deleting them. Each message or event is an entry. [Package terminology](NOTES-research.md). |
 | Dataset | Apify's collection of output rows. The scraper writes products, and the repair writes a report row. [Output examples](WALKTHROUGH.md). |
 | Deterministic | The same input gives the same result. The page comparison uses ordinary code before asking the model. [Comparison implementation](repair-actor/src/diff-bundle.ts). |
 | Diff bundle, page comparison | The report of changes between the saved page and the current one, together with the failed run's results. [Comparison implementation](repair-actor/src/diff-bundle.ts). |
 | Document | A stored record with a defined shape and version that belongs to a conversation or session. Approval and status use these records. [Record definitions](repair-actor/src/agent-tools.ts). |
 | Durable | Able to recover saved progress after the process stops, using stored records. [Storage decisions](DECISIONS.md). |
 | Fill rate | The share of scraped items that contain a value for a field, such as price. [Output check](actors/scraper/main.js). |
-| Fixture, build reference, invariant | A fixture is a build reference such as the saved page or expected output. Invariants are the rules later output should meet, including item-count and fill-rate limits. [Reference records](repair-actor/src/fixtures.ts) and [initial rules](repair-actor/scripts/build-session.ts). |
-| Fork | A new conversation sharing another conversation's history up to an entry. This lets a repair use the build conversation. [Repair startup](repair-actor/src/main.ts). |
-| Handoff, saved build notes | The agent writes a note and starts a shorter conversation with that note visible. Its earlier reasoning remains stored. [Walkthrough explanation](WALKTHROUGH.md). |
+| Fixture, build reference, invariant | A fixture is an unchanged original build reference such as the saved page or expected output. Invariants are the rules later output should meet, including item-count and fill-rate limits. [Reference records](repair-actor/src/fixtures.ts) and [initial rules](repair-actor/scripts/build-session.ts). |
+| Fork | A new conversation sharing another conversation's history up to an entry. Repairs inherit the latest finished repair's handoff, or the build handoff before any repair finishes. [Repair startup](repair-actor/src/main.ts). |
+| Handoff, latest saved notes | The agent writes a note at the end of a build or repair and starts a shorter context with that note visible. Earlier entries remain stored. [Walkthrough explanation](WALKTHROUGH.md). |
 | Harness | Pi Durable's main object, which opens storage, runs the agent, and resumes work. [Interface notes](NOTES-research.md). |
-| Hook | Code that runs before or after a tool. The approval check runs before `promote`. [Approval decision](DECISIONS.md). |
+| Hook | Code that runs at a framework event, such as before a tool or compaction. The approval check runs before `promote`. [Approval decision](DECISIONS.md). |
 | Incident, diagnosis | An incident is the stored failure information given to the agent. It includes the page comparison. `DIAGNOSIS` is the scraper's stored explanation of its failure. [Incident code](repair-actor/src/diff-bundle.ts) and [scraper](actors/scraper/main.js). |
 | Key-value store, KV store | Apify storage where a key names a record. This project uses it for the website setting and agent memory. [Storage uses](WALKTHROUGH.md). |
 | Memo | A stored result a tool or hook can read again after restart. [Package interface](NOTES-research.md). |
 | Model turn, generation | A request to the language model that produces its next response or tool calls. The task list labels this `pi.generation`. [Restart explanation](WALKTHROUGH.md#step-3-stop-the-repair-run-start-it-again-and-it-picks-up-where-it-left-off). |
 | Permanent link, stable link, redirector | The fixed address that redirects to the currently running repair Actor's web page. [Redirect server](actors/redirector/main.js). |
 | Production, prod, promotion | Production is the version used for normal scraper runs. `prod` is its build label. Promotion moves that label to the approved build. [Final step](WALKTHROUGH.md#step-5-the-agent-fixes-and-tests-the-code-a-person-approves-and-the-fix-goes-live). |
+| Recall | The `recall_history` tool searches saved assistant text, tool-call arguments, handoffs, and summaries across the current fork chain. [Implementation](repair-actor/src/history.ts). |
 | Replay, replay safe | Recovery reads saved changes again. An interrupted tool marked replay safe can run again. Other interrupted tools return an interruption to the model. [Recovery rules](NOTES-research.md). |
-| Reset | The demo reset restores its original site, source, and build. The conversation reset keeps saved build notes visible to the model. These are separate operations. [Demo reset](scripts/smoke.ts) and [conversation interface](NOTES-research.md). |
+| Reset | The demo reset restores its original site, source, and build. The conversation reset makes the latest handoff visible while hiding older entries from active context. These are separate operations. [Demo reset](scripts/smoke.ts) and [conversation interface](NOTES-research.md). |
 | Selector, CSS class | A selector is a pattern used to find part of an HTML page. A CSS class is a label on a page element that a selector can match. [Scraper selectors](actors/scraper/selectors.js). |
 | Sequence, seq, snapshot, head | `seq` numbers saved steps. A snapshot stores the accumulated writes every 25 steps. `head` records a snapshot's sequence number, but startup does not trust it. [Storage decisions](DECISIONS.md). |
 | Smoke test, smoke pass | The unattended script that performs the demo and checks its results. A pass is one execution of that sequence. [Test script](scripts/smoke.ts). |

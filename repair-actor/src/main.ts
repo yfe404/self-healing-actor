@@ -1,13 +1,15 @@
 // The repair Actor loads the agent's saved steps from its key-value store through the agent framework.
 // It prints completed and interrupted work, serves the agent web page, and computes the page comparison.
-// The repair conversation shares the history and saved build notes from the initial scraper build.
+// New repairs share the latest finished repair's history and notes, falling back to the original build.
 // `probe` mode uses a slow test tool to demonstrate stopping and restarting the run.
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { Type } from "@earendil-works/pi-ai";
 import { AssistantEntry, createRegistry, defineExtension, defineTool, Harness, type Conversation } from "@earendil-works/pi-durable";
 import { Actor } from "apify";
 import { RepairExtension, type ToolEnv } from "./agent-tools.js";
-import { computeDiffBundle, incidentText } from "./diff-bundle.js";
+import { computeDiffBundle } from "./diff-bundle.js";
+import { compactionSettings } from "./compaction.js";
+import { abandonMarkedWork, countOwnToolResults, markStaleWork, ownEntries, reconcileLatestHandoff, repairMappingKey, submitSavedIncident, type RepairMapping } from "./repair-chain.js";
 import { openFixtureStore } from "./fixtures.js";
 import { MODELS, openModels } from "./models.js";
 import { openAgentStorage, otherOwnerRunning, REDIRECTOR_URL, type RepairInput, runUrl, self, TARGET_URL } from "./platform.js";
@@ -39,21 +41,27 @@ const { storage, storeId, storeUrl } = await openAgentStorage(input.actorId, log
 log(`agent memory store: ${storeUrl}`);
 log(`memory recovered: snapshot=${storage.recovery.snapshotSeq ?? "none"}, log records replayed=${storage.recovery.replayedFromLog}, head seq=${storage.recovery.headSeq}`);
 const fixtures = openFixtureStore(storeId);
+const mappingKey = repairMappingKey(input.failedRunId);
+const mapping = (await fixtures.get(mappingKey))?.value as RepairMapping | undefined;
+// Persist ALL stale abort marks before opening the scheduler. Even abort() can start scheduling.
+const staleConversations = input.mode === "probe" ? [] : await markStaleWork(storage, mapping?.conversationId, context);
 
+let harnessRef: Harness | undefined;
 const env: ToolEnv = {
 	scraperActorId: input.actorId,
 	failedRunId: input.failedRunId,
 	targetUrl,
 	fixtures,
 	log,
+	getConversation: (id, ctx) => {
+		if (!harnessRef) throw new Error("repair harness is not open yet");
+		return harnessRef.conversation(id, ctx);
+	},
 	budget: {
 		maxToolCalls: 60,
 		maxElapsedMs: 40 * 60_000,
 		startedAt,
-		toolCallsSoFar: async (conversationId) => {
-			const page = await storage.scanEntries({ conversationId: conversationId as never }, 1000, undefined, context);
-			return page.items.filter((entry) => (entry as { kind?: string }).kind === "pi.tool-result").length;
-		},
+		toolCallsSoFar: async (conversationId) => countOwnToolResults(storage, conversationId as never, context),
 	},
 };
 
@@ -87,19 +95,24 @@ const registry = createRegistry();
 if (input.mode === "probe") registry.install(defineExtension({ name: "probe", tools: [quickStep, slowSteps] }));
 else registry.install(RepairExtension(env));
 
+const models = openModels();
+const compaction = compactionSettings(models, [MODELS.fix, MODELS.narrate, MODELS.build]);
+log(`compaction policies from the installed model catalog: ${JSON.stringify(compaction.modelOverrides)}`);
 const harness = await Harness.open(
 	storage,
 	{
-		models: openModels(),
+		models,
 		registry,
-		settings: { toolExecution: "sequential", stream: { timeoutMs: 180_000 }, afterFailedRun: "continue" },
+		settings: { toolExecution: "sequential", stream: { timeoutMs: 180_000 }, afterFailedRun: "continue", compaction },
 		onReport: (error, info) => log(`report (${JSON.stringify(info)}): ${error instanceof Error ? error.stack ?? error.message : String(error)}`),
 	},
 	context,
 );
 
+harnessRef = harness;
+
 const inspection = await printTaskTree(harness, storage, context, log, "task tree at startup (before resume)");
-if (inspection.tasks.length > 0) log("some work was cut off by the previous run; resuming it now.");
+if (inspection.tasks.length > 0) log("recovered unfinished work; only this incident resumes, stale investigations are marked for abandonment.");
 
 let repairConversation: Conversation | undefined;
 const server = startSteerServer({
@@ -110,7 +123,7 @@ const server = startSteerServer({
 	conversation: async () => repairConversation as never,
 	header: () => `repair of ${input.actorId} for failed run ${input.failedRunId} | this run: ${self.runId ?? "local"} | memory: ${storeUrl}`,
 });
-harness.resume();
+if (input.mode !== "probe") await abandonMarkedWork(harness, staleConversations, context, log);
 
 if (input.mode === "probe") {
 	const root = await harness.root(context, { agent: { model: MODELS.narrate } });
@@ -132,50 +145,33 @@ if (input.mode === "probe") {
 		log(`answer: ${JSON.stringify(answer?.model?.[0] ?? answer)}`);
 	}
 } else {
-	// Each failed run gets a repair conversation that shares the initial build conversation's history.
-	// Save the conversation ID so a restarted run finds the same investigation.
-	// Abandon pending requests from other failures whose repair runs stopped and never restarted.
-	// Only the current failure's investigation continues.
-	for (const stale of inspection.submissions as readonly { id: unknown; conversationId: unknown; requestId?: string }[]) {
-		if (stale.requestId === input.failedRunId) continue;
-		const staleConversation = await harness.conversation(stale.conversationId as never, context);
-		if (!staleConversation) continue;
-		log(`abandoning stale investigation for request ${stale.requestId ?? "?"} (conversation #${String(stale.conversationId)}): its run was aborted and this run is for a different incident`);
-		await Promise.race([staleConversation.abort(context), new Promise((resolve) => setTimeout(resolve, 20_000))]);
-	}
-	const mappingKey = `repair-conversation-${input.failedRunId}`;
-	const mapping = (await fixtures.get(mappingKey))?.value as { conversationId: number } | undefined;
+	const latest = await reconcileLatestHandoff(harness, storage, fixtures, context);
 	const root = await harness.root(context);
 	if (mapping) {
-		repairConversation = await harness.conversation(mapping.conversationId as never, context);
-		log(`resuming investigation in conversation #${mapping.conversationId} (fork of the build conversation #${String(root.id)})`);
+		repairConversation = await harness.conversation(mapping.conversationId, context);
+		if (!repairConversation) throw new Error(`mapped repair conversation #${mapping.conversationId} is missing`);
+		log(`resuming investigation in conversation #${mapping.conversationId} (parent conversation #${String(mapping.parentConversationId ?? root.id)}, fork entry #${String(mapping.forkedAt ?? "legacy")})`);
 	} else {
-		// Step 2: plain code computes the page comparison before any model call.
-		const bundle = await computeDiffBundle({ failedRunId: input.failedRunId, targetUrl, fixtures, log });
-		const last = (await root.entries({}, 1, undefined, context)).items[0];
-		if (!last) throw new Error("the build conversation is empty: run the build session first");
-		repairConversation = await root.fork(last.id, { ownership: { kind: "ownerless" }, agent: { model: MODELS.fix } }, context);
-		await fixtures.put(mappingKey, { conversationId: repairConversation.id, forkedAt: last.id, bundleKey: `incident-${input.failedRunId}` }, "application/json");
-		log(`forked the build conversation #${String(root.id)} at entry #${String(last.id)} into conversation #${String(repairConversation.id)}; the agent sees its own handoff note first`);
-		// Record the failure as a platform entry with kind `apify.incident`. It has its own source label.
-		await repairConversation.submit(
-			{
-				requestId: input.failedRunId,
-				type: "input",
-				content: incidentText(bundle),
-				entry: { kind: "apify.incident", data: { summary: incidentText(bundle), bundleKey: `incident-${input.failedRunId}`, failedRunId: input.failedRunId } },
-			},
-			context,
-		);
-		log(`incident submitted (request id = failed run id ${input.failedRunId}); waking the agent`);
+		// Plain code computes the comparison against the immutable original build before any model call.
+		await computeDiffBundle({ failedRunId: input.failedRunId, targetUrl, fixtures, log });
+		const parent = latest ? await harness.conversation(latest.conversationId, context) : root;
+		if (!parent) throw new Error("latest completed repair conversation is missing");
+		const forkedAt = latest?.entryId ?? (await ownEntries(root, context)).filter((entry) => entry.kind === "pi.reset").at(-1)?.id;
+		if (!forkedAt) throw new Error("the build has no handoff: run the build session first");
+		repairConversation = await parent.fork(forkedAt, { ownership: { kind: "ownerless" }, agent: { model: MODELS.fix } }, context);
+		const provenance: RepairMapping = { conversationId: repairConversation.id, forkedAt, parentConversationId: parent.id, ...(latest ? { parentFailedRunId: latest.failedRunId } : {}), bundleKey: `incident-${input.failedRunId}` };
+		await fixtures.put(mappingKey, provenance, "application/json");
+		log(`forked the ${latest ? "latest finished repair" : "build"} conversation #${String(parent.id)} at entry #${String(forkedAt)} into conversation #${String(repairConversation.id)}; the agent sees its own handoff note first${latest ? ` (source incident ${latest.failedRunId})` : ""}`);
 	}
-	if (!repairConversation) throw new Error("no repair conversation");
-	// The same request ID returns the existing request after a restart. Wait for the agent to finish.
-	const submission = await repairConversation.submit({ requestId: input.failedRunId, type: "input", content: "(resubmitted)" }, context);
+	// Reuse the actual saved incident even if the process died between mapping and admission.
+	const submission = await submitSavedIncident(repairConversation, input.failedRunId, fixtures, context);
+	log(`incident submitted (request id = failed run id ${input.failedRunId}); waking the agent`);
 	log(`waiting for the agent to finish (submission #${String(submission.id)})`);
 	const settled = await submission.wait(context);
 	log(`investigation finished: ${settled.status}`);
 	await repairConversation.waitForIdle(context);
+	const completed = await reconcileLatestHandoff(harness, storage, fixtures, context);
+	if (completed) log(`latest handoff: conversation #${String(completed.conversationId)}, entry #${String(completed.entryId)}, source incident ${completed.failedRunId}`);
 }
 
 await printTaskTree(harness, storage, context, log, "task tree at shutdown");
